@@ -1,0 +1,27 @@
+- name: Tear down Kong assessment host
+  hosts: kong_hosts
+  become: true
+  tasks:
+    - name: Check for Kong compose file
+      ansible.builtin.stat:
+        path: "{{ kong_install_root }}/docker-compose.yml"
+      register: kong_compose
+
+    - name: Stop Kong stack and remove containers and volumes
+      ansible.builtin.command: docker compose down -v
+      args:
+        chdir: "{{ kong_install_root }}"
+      when: kong_compose.stat.exists
+      changed_when: true
+
+    - name: Check for observability compose file
+      ansible.builtin.stat:
+        path: "{{ observability_install_root }}/docker-compose.yml"
+      register: observability_compose
+
+    - name: Stop observability stack and remove containers and volumes
+      ansible.builtin.command: docker compose down -v
+      args:
+        chdir: "{{ observability_install_root }}"
+      when: observability_compose.stat.exists
+      changed_when: true

@@ -1,18 +1,39 @@
+- name: Ensure python3-apt is available for Ansible apt modules
+  ansible.builtin.raw: |
+    python3 -c "import apt" >/dev/null 2>&1 || (apt-get update && apt-get install -y python3-apt)
+  changed_when: false
+
 - name: Install Docker prerequisites
-  ansible.builtin.apt:
-    name:
-      - ca-certificates
-      - curl
-      - docker.io
-      - docker-compose
-    state: present
-    update_cache: true
+  ansible.builtin.raw: |
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    missing_packages=""
+    for package in ca-certificates curl docker.io docker-compose; do
+      dpkg -s "$package" >/dev/null 2>&1 || missing_packages="$missing_packages $package"
+    done
+    if [ -n "$missing_packages" ]; then
+      apt-get update
+      apt-get install -y $missing_packages
+      echo changed
+    fi
+  register: docker_prereqs_install
+  changed_when: "'changed' in docker_prereqs_install.stdout"
+
+- name: Check for a local Docker init script
+  ansible.builtin.stat:
+    path: /etc/init.d/docker
+  register: docker_init_script
 
 - name: Ensure Docker service is enabled and running
   ansible.builtin.service:
     name: docker
     enabled: true
     state: started
+  when: docker_init_script.stat.exists
+
+- name: Verify Docker CLI can reach a daemon
+  ansible.builtin.command: docker info
+  changed_when: false
 
 - name: Ensure remote user can access Docker
   ansible.builtin.user:

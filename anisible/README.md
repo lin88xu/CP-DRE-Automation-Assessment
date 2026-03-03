@@ -30,8 +30,48 @@ anisible/
 ## Run Locally
 
 ```bash
-cd anisible
-ansible-playbook -i inventories/local/hosts.yml playbooks/site.yml
+cd terraform/environments/local
+terraform init
+terraform apply
+```
+
+```bash
+cd <repo-root>/anisible
+
+ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
+ansible-playbook \
+  -K \
+  -i ../terraform/environments/local/generated/hosts.yml \
+  playbooks/site.yml \
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+```
+
+Replace `<repo-root>` with the directory where you cloned this repository. If the repository is being run from WSL under `/mnt/c/...`, Ansible may ignore `ansible.cfg` because the path is considered world-writable. In that case, either set `ANSIBLE_CONFIG` as shown above or use:
+
+```bash
+cd <repo-root>/anisible
+
+ANSIBLE_ROLES_PATH=<repo-root>/anisible/roles \
+ansible-playbook \
+  -K \
+  -i ../terraform/environments/local/generated/hosts.yml \
+  playbooks/site.yml \
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+```
+
+For local runs, `-K` prompts for the sudo password required by `become`.
+
+## Tear Down Local Deployment
+
+```bash
+cd <repo-root>/anisible
+
+ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
+ansible-playbook \
+  -K \
+  -i ../terraform/environments/local/generated/hosts.yml \
+  playbooks/teardown.yml \
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
 ```
 
 ## Run Against AWS Or Azure
@@ -56,5 +96,4 @@ ansible-playbook -i inventories/azure/hosts.yml playbooks/site.yml
 
 - Debian or Ubuntu based target hosts
 - Passwordless sudo or equivalent privilege escalation
-- Terraform has already provisioned the host for AWS or Azure
-
+- Terraform has already provisioned the target host or generated the local handoff files

@@ -73,8 +73,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "up{job=\"{{ observability_kong_job_name }}\",scrape_target=\"kong\"}",
-          "legendFormat": "{{ observability_kong_job_name }}",
+          "expr": "up{job=\"kong-admin\"}",
+          "legendFormat": "kong-admin",
           "range": true,
           "refId": "A"
         }
@@ -117,7 +117,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(kong_http_requests_total{exported_service!~\".+\"}[5m]))",
+          "expr": "sum(rate(kong_http_requests_total[5m]))",
           "legendFormat": "requests/sec",
           "range": true,
           "refId": "A"
@@ -137,7 +137,7 @@
             "mode": "palette-classic"
           },
           "mappings": [],
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -161,7 +161,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(kong_kong_latency_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(kong_latency_bucket[5m])) by (le))",
           "legendFormat": "p95 latency",
           "range": true,
           "refId": "A"
@@ -205,28 +205,28 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(kong_nginx_connections_total{state=\"active\"})",
+          "expr": "kong_nginx_connections_active",
           "legendFormat": "active",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "sum(kong_nginx_connections_total{state=\"reading\"})",
+          "expr": "kong_nginx_connections_reading",
           "legendFormat": "reading",
           "range": true,
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "sum(kong_nginx_connections_total{state=\"writing\"})",
+          "expr": "kong_nginx_connections_writing",
           "legendFormat": "writing",
           "range": true,
           "refId": "C"
         },
         {
           "editorMode": "code",
-          "expr": "sum(kong_nginx_connections_total{state=\"waiting\"})",
+          "expr": "kong_nginx_connections_waiting",
           "legendFormat": "waiting",
           "range": true,
           "refId": "D"
@@ -270,8 +270,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (service, code) (rate(kong_http_requests_total{exported_service!~\".+\"}[5m]))",
-          "legendFormat": "{{ '{{' }}service{{ '}}' }} {{ '{{' }}code{{ '}}' }}",
+          "expr": "sum by (service, code) (rate(kong_http_requests_total[5m]))",
+          "legendFormat": "{{service}} {{code}}",
           "range": true,
           "refId": "A"
         }
@@ -280,7 +280,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "15s",
+  "refresh": "30s",
   "schemaVersion": 39,
   "style": "dark",
   "tags": [

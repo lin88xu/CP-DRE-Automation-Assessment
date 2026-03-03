@@ -17,5 +17,6 @@ scrape_configs:
       - targets:
           - host.docker.internal:8001
         labels:
-          environment: local
-          scrape_target: kong
+          environment: managed
+          service: kong
+
