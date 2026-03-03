@@ -62,7 +62,59 @@ terraform init
 terraform apply
 ```
 
+After apply, Terraform prints the standard Kong URLs plus the managed observability outputs, including `grafana_workspace_url`, `grafana_kong_dashboard_url`, `amp_prometheus_endpoint`, and `amp_remote_write_url`.
+
 The AWS target provisions an AMP workspace plus an AMG workspace. Because the pinned AWS provider only exposes the managed scraper for EKS sources, the ECS task includes a small Prometheus sidecar that scrapes Kong locally and remote-writes to AMP.
+If you want Terraform to grant Amazon Managed Grafana access automatically, set the IAM Identity Center user IDs and group IDs in `terraform/environments/aws/terraform.tfvars`. The AWS target supports separate Admin, Editor, and Viewer assignments for both users and groups.
+Terraform also bootstraps the AMG workspace by creating an AMP-backed Prometheus data source and importing the `Kong (official)` dashboard.
+
+## AWS Verification
+
+Use the outputs first:
+
+```bash
+cd terraform/environments/aws
+terraform output proxy_url
+terraform output admin_url
+terraform output amp_prometheus_endpoint
+terraform output grafana_workspace_url
+```
+
+1. Confirm Kong is up:
+
+```bash
+curl -sS "$(terraform output -raw admin_url)/status"
+```
+
+2. Send sample traffic through Kong. If you kept the default route settings, use the default host header:
+
+```bash
+for i in $(seq 1 20); do
+  curl -sS -H "Host: example.com" "$(terraform output -raw proxy_url)/" >/dev/null
+done
+```
+
+3. Wait 1 to 2 minutes for the ECS Prometheus sidecar to scrape Kong and remote-write into AMP.
+
+4. Open the Grafana workspace URL:
+
+```bash
+terraform output -raw grafana_workspace_url
+```
+
+Sign in with AWS SSO / IAM Identity Center, then use Explore or a dashboard to run:
+
+```text
+up{job="kong-admin",scrape_target="kong"}
+sum(rate(kong_http_requests_total[5m]))
+```
+
+Expected result:
+
+- `up{job="kong-admin",scrape_target="kong"}` returns `1`
+- `sum(rate(kong_http_requests_total[5m]))` is greater than `0` after test traffic
+
+If metrics do not appear, check the ECS task logs in CloudWatch under `/ecs/<name_prefix>` and look for the `amp-collector` and `kong` log streams.
 
 Azure:
 
@@ -88,6 +140,5 @@ It also exposes `inventory_file`, `vars_file`, and `ansible_deploy_command` via 
 - Docker must already be available for the `local` target.
 - AWS credentials and Azure credentials must be configured in the shell or standard provider locations.
 - The AWS target exposes ports `8000`, `8001`, and `8002` through the ALB security group.
-- The AWS target assumes IAM Identity Center / AWS SSO is available for logging into the Amazon Managed Grafana workspace.
 - The Azure target exposes ports `22`, `8000`, `8001`, and `8002` to the configured `admin_cidr`.
 - The Terraform CLI is available locally; AWS configuration formatting and validation have been run, but a real `plan` still depends on valid cloud credentials and workspace variables.

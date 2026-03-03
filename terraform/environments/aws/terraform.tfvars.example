@@ -15,8 +15,21 @@ scale_out_cooldown    = 60
 enable_managed_observability = true
 observability_kong_job_name  = "kong-admin"
 observability_scrape_interval = "10s"
+grafana_admin_user_ids  = []
+grafana_editor_user_ids = []
+grafana_viewer_user_ids = []
+grafana_admin_group_ids  = []
+grafana_editor_group_ids = []
+grafana_viewer_group_ids = []
+enable_grafana_dashboard_bootstrap          = true
+grafana_dashboard_service_account_token_ttl = 14400
+grafana_prometheus_datasource_name          = "Amazon Managed Service for Prometheus"
 
 # Kong runs on ECS/Fargate behind an ALB in the AWS target.
-# Managed observability adds an AMP workspace, an AMG workspace, and a Prometheus sidecar
-# in the ECS task that scrapes Kong and remote-writes metrics to AMP.
+# Managed observability adds an AMP workspace, an AMG workspace, and a Prometheus
+# sidecar in the ECS task that scrapes Kong and remote-writes to AMP.
+# Fill the Grafana IAM Identity Center user/group IDs above if you want Terraform
+# to grant AMG workspace access during deployment. Do not place the same user or
+# group ID in more than one role list. Terraform also bootstraps the AMG workspace
+# with an AMP data source and the "Kong (official)" dashboard.
 # Adjust the task size, scaling targets, or CIDR values here if your environment needs them.

@@ -40,6 +40,7 @@ locals {
   })
   kong_container_name    = "${var.name_prefix}-kong"
   kong_config_string     = local.docker_kong
+  kong_config_path       = "/tmp/docker-kong.yml"
   ecs_resource_id        = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.this.name}"
   proxy_resource_label   = "${aws_lb.this.arn_suffix}/${aws_lb_target_group.proxy.arn_suffix}"
   amp_workspace_alias    = "${var.name_prefix}-amp"
@@ -50,14 +51,55 @@ locals {
   amp_recording_rules = templatefile("${path.module}/../../templates/amp-kong-recording-rules.yml.tftpl", {
     observability_kong_job_name = var.observability_kong_job_name
   })
-  amp_remote_write_endpoint = var.enable_managed_observability ? "${aws_prometheus_workspace.this[0].prometheus_endpoint}api/v1/remote_write" : null
+  amp_remote_write_url             = var.enable_managed_observability ? "${aws_prometheus_workspace.this[0].prometheus_endpoint}api/v1/remote_write" : null
+  grafana_bootstrap_enabled        = var.enable_managed_observability && var.enable_grafana_dashboard_bootstrap
+  grafana_bootstrap_dashboard_path = "${path.module}/../../templates/kong-official.json"
+  grafana_bootstrap_script_path    = "${path.module}/../../scripts/import_amg_dashboard.py"
   common_tags = merge(var.tags, {
     ManagedBy = "Terraform"
   })
+  grafana_role_assignments = var.enable_managed_observability ? {
+    admin = {
+      role      = "ADMIN"
+      user_ids  = toset(var.grafana_admin_user_ids)
+      group_ids = toset(var.grafana_admin_group_ids)
+    }
+    editor = {
+      role      = "EDITOR"
+      user_ids  = toset(var.grafana_editor_user_ids)
+      group_ids = toset(var.grafana_editor_group_ids)
+    }
+    viewer = {
+      role      = "VIEWER"
+      user_ids  = toset(var.grafana_viewer_user_ids)
+      group_ids = toset(var.grafana_viewer_group_ids)
+    }
+  } : {}
+  grafana_role_assignments_enabled = {
+    for key, value in local.grafana_role_assignments : key => value
+    if length(value.user_ids) > 0 || length(value.group_ids) > 0
+  }
+  grafana_user_role_overlap = setunion(
+    setintersection(toset(var.grafana_admin_user_ids), toset(var.grafana_editor_user_ids)),
+    setintersection(toset(var.grafana_admin_user_ids), toset(var.grafana_viewer_user_ids)),
+    setintersection(toset(var.grafana_editor_user_ids), toset(var.grafana_viewer_user_ids))
+  )
+  grafana_group_role_overlap = setunion(
+    setintersection(toset(var.grafana_admin_group_ids), toset(var.grafana_editor_group_ids)),
+    setintersection(toset(var.grafana_admin_group_ids), toset(var.grafana_viewer_group_ids)),
+    setintersection(toset(var.grafana_editor_group_ids), toset(var.grafana_viewer_group_ids))
+  )
   kong_container_definition = {
-    name      = local.kong_container_name
-    image     = var.kong_image
-    essential = true
+    name       = local.kong_container_name
+    image      = var.kong_image
+    essential  = true
+    entryPoint = ["/bin/sh", "-ec"]
+    command = [join("\n", [
+      "cat <<'EOF' >${local.kong_config_path}",
+      local.kong_config_string,
+      "EOF",
+      "exec /docker-entrypoint.sh kong docker-start"
+    ])]
     portMappings = [
       {
         containerPort = 8000
@@ -91,7 +133,8 @@ locals {
       { name = "KONG_ENFORCE_RBAC", value = "off" },
       { name = "KONG_LOG_LEVEL", value = "info" },
       { name = "KONG_PREFIX", value = "/usr/local/kong" },
-      { name = "KONG_DECLARATIVE_CONFIG_STRING", value = local.kong_config_string }
+      { name = "KONG_DECLARATIVE_CONFIG", value = local.kong_config_path },
+      { name = "KONG_DECLARATIVE_CONFIG_ENCODED", value = "false" }
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -124,7 +167,7 @@ locals {
     ]
     remote_write = [
       {
-        url = local.amp_remote_write_endpoint
+        url = local.amp_remote_write_url
         sigv4 = {
           region = data.aws_region.current.name
         }
@@ -137,7 +180,7 @@ locals {
     "EOF",
     "exec /bin/prometheus \\",
     "  --config.file=/tmp/prometheus.yaml \\",
-    "  --storage.tsdb.path=/prometheus \\",
+    "  --storage.agent.path=/tmp/prometheus-agent \\",
     "  --enable-feature=agent"
   ]) : null
   amp_collector_container_definition = var.enable_managed_observability ? {
@@ -505,6 +548,75 @@ resource "aws_grafana_workspace" "this" {
   })
 
   depends_on = [aws_iam_role_policy_attachment.grafana_amp_query]
+
+  lifecycle {
+    precondition {
+      condition     = length(local.grafana_user_role_overlap) == 0
+      error_message = "Each Grafana user ID can only be assigned to one AMG role. Remove duplicates across admin/editor/viewer user lists."
+    }
+
+    precondition {
+      condition     = length(local.grafana_group_role_overlap) == 0
+      error_message = "Each Grafana group ID can only be assigned to one AMG role. Remove duplicates across admin/editor/viewer group lists."
+    }
+  }
+}
+
+resource "aws_grafana_role_association" "roles" {
+  for_each = local.grafana_role_assignments_enabled
+
+  workspace_id = aws_grafana_workspace.this[0].id
+  role         = each.value.role
+  user_ids     = each.value.user_ids
+  group_ids    = each.value.group_ids
+}
+
+resource "aws_grafana_workspace_service_account" "dashboard_bootstrap" {
+  count = local.grafana_bootstrap_enabled ? 1 : 0
+
+  workspace_id = aws_grafana_workspace.this[0].id
+  name         = "${var.name_prefix}-dashboard-bootstrap"
+  grafana_role = "ADMIN"
+}
+
+resource "aws_grafana_workspace_service_account_token" "dashboard_bootstrap" {
+  count = local.grafana_bootstrap_enabled ? 1 : 0
+
+  workspace_id       = aws_grafana_workspace.this[0].id
+  service_account_id = aws_grafana_workspace_service_account.dashboard_bootstrap[0].service_account_id
+  name               = "${var.name_prefix}-dashboard-bootstrap-token"
+  seconds_to_live    = var.grafana_dashboard_service_account_token_ttl
+}
+
+resource "terraform_data" "grafana_dashboard_bootstrap" {
+  count = local.grafana_bootstrap_enabled ? 1 : 0
+
+  triggers_replace = [
+    filesha256(local.grafana_bootstrap_dashboard_path),
+    aws_grafana_workspace.this[0].endpoint,
+    aws_grafana_workspace_service_account_token.dashboard_bootstrap[0].service_account_token_id,
+    aws_prometheus_workspace.this[0].prometheus_endpoint,
+    var.grafana_prometheus_datasource_name,
+    data.aws_region.current.name,
+  ]
+
+  provisioner "local-exec" {
+    command = "python3 ${local.grafana_bootstrap_script_path}"
+
+    environment = {
+      AMG_URL         = aws_grafana_workspace.this[0].endpoint
+      AMG_TOKEN       = aws_grafana_workspace_service_account_token.dashboard_bootstrap[0].key
+      AMP_QUERY_URL   = aws_prometheus_workspace.this[0].prometheus_endpoint
+      AWS_REGION      = data.aws_region.current.name
+      DASHBOARD_JSON  = local.grafana_bootstrap_dashboard_path
+      DATASOURCE_NAME = var.grafana_prometheus_datasource_name
+    }
+  }
+
+  depends_on = [
+    aws_grafana_role_association.roles,
+    aws_grafana_workspace_service_account_token.dashboard_bootstrap
+  ]
 }
 
 resource "aws_ecs_cluster" "this" {

@@ -31,12 +31,6 @@
     dest: "{{ observability_install_root }}/prometheus/rules/kong-alerts.yml"
     mode: "0644"
 
-- name: Render Prometheus recording rules
-  ansible.builtin.template:
-    src: kong-recording-rules.yml.j2
-    dest: "{{ observability_install_root }}/prometheus/rules/kong-recording-rules.yml"
-    mode: "0644"
-
 - name: Render Grafana datasource provisioning
   ansible.builtin.template:
     src: grafana-datasource.yml.j2
@@ -49,18 +43,10 @@
     dest: "{{ observability_install_root }}/grafana/provisioning/dashboards/dashboards.yml"
     mode: "0644"
 
-- name: Remove stale Grafana dashboards
-  ansible.builtin.file:
-    path: "{{ observability_install_root }}/grafana/dashboards/{{ item }}"
-    state: absent
-  loop:
-    - kong-overview.json
-    - kong-operations.json
-
-- name: Copy Grafana Kong official dashboard
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../kong/kong/plugins/prometheus/grafana/kong-official.json"
-    dest: "{{ observability_install_root }}/grafana/dashboards/kong-official.json"
+- name: Render Grafana Kong overview dashboard
+  ansible.builtin.template:
+    src: kong-overview.json.j2
+    dest: "{{ observability_install_root }}/grafana/dashboards/kong-overview.json"
     mode: "0644"
 
 - name: Start observability stack

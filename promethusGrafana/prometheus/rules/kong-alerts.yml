@@ -2,7 +2,7 @@ groups:
   - name: kong-health
     rules:
       - alert: KongAdminMetricsUnavailable
-        expr: up{job="kong-admin",scrape_target="kong"} == 0
+        expr: up{job="kong-admin"} == 0
         for: 2m
         labels:
           severity: critical
@@ -18,3 +18,4 @@ groups:
         annotations:
           summary: Kong request metrics are missing
           description: Kong is up but request metrics are absent, which usually means no traffic or a broken plugin/configuration.
+
