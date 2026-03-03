@@ -2,12 +2,13 @@ name: Observability Smoke
 
 on:
   push:
-    paths:
-      - ".github/workflows/observability-smoke.yml"
-      - "promethusGrafana/**"
-      - "deployment/kong/**"
-      - "README.md"
+    branches:
+      - main
+      - release/aws-observability
   pull_request:
+    branches:
+      - main
+      - release/aws-observability
     paths:
       - ".github/workflows/observability-smoke.yml"
       - "promethusGrafana/**"

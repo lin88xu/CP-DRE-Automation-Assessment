@@ -2,11 +2,13 @@ name: Terraform CI
 
 on:
   push:
-    paths:
-      - ".github/workflows/terraform-ci.yml"
-      - "terraform/**"
-      - "README.md"
+    branches:
+      - main
+      - release/aws-observability
   pull_request:
+    branches:
+      - main
+      - release/aws-observability
     paths:
       - ".github/workflows/terraform-ci.yml"
       - "terraform/**"
@@ -102,4 +104,3 @@ jobs:
           name: terraform-${{ matrix.environment }}-logs
           path: ci-artifacts/terraform/${{ matrix.environment }}
           if-no-files-found: error
-

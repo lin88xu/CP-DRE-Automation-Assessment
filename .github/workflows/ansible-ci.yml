@@ -2,11 +2,13 @@ name: Ansible CI
 
 on:
   push:
-    paths:
-      - ".github/workflows/ansible-ci.yml"
-      - "anisible/**"
-      - "README.md"
+    branches:
+      - main
+      - release/aws-observability
   pull_request:
+    branches:
+      - main
+      - release/aws-observability
     paths:
       - ".github/workflows/ansible-ci.yml"
       - "anisible/**"
