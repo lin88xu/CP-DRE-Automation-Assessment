@@ -39,6 +39,37 @@ jobs:
             const required = ["Terraform CI", "Ansible CI", "Observability Smoke"];
             const targetBranch = "release/aws-observability";
             const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const listRunsForSha = async (sha) => {
+              const attempts = 5;
+
+              for (let attempt = 1; attempt <= attempts; attempt += 1) {
+                try {
+                  return await github.paginate(
+                    github.rest.actions.listWorkflowRunsForRepo,
+                    {
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      head_sha: sha,
+                      event: "push",
+                      per_page: 100,
+                    }
+                  );
+                } catch (error) {
+                  const status = error.status || "unknown";
+                  core.warning(
+                    `GitHub Actions API lookup failed on attempt ${attempt}/${attempts} for ${sha}: ${status} ${error.message}`
+                  );
+
+                  if (attempt === attempts) {
+                    throw error;
+                  }
+
+                  await sleep(10000);
+                }
+              }
+
+              return [];
+            };
 
             let sha = context.sha;
             let branch = context.ref.replace("refs/heads/", "");
@@ -57,42 +88,44 @@ jobs:
             } else {
               const deadline = Date.now() + 20 * 60 * 1000;
 
-              while (Date.now() < deadline) {
-                const runs = await github.paginate(
-                  github.rest.actions.listWorkflowRunsForRepo,
-                  {
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    head_sha: sha,
-                    per_page: 100,
+              try {
+                while (Date.now() < deadline) {
+                  const runs = await listRunsForSha(sha);
+
+                  report = required.map((name) => {
+                    const matches = runs
+                      .filter((run) => run.name === name)
+                      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    const latest = matches[0];
+
+                    return {
+                      name,
+                      status: latest ? latest.status : "missing",
+                      conclusion: latest ? latest.conclusion || "in_progress" : "missing",
+                    };
+                  });
+
+                  const allCompleted = report.every((item) => item.status === "completed");
+                  const allSucceeded = report.every((item) => item.conclusion === "success");
+                  const anyFailed = report.some(
+                    (item) => item.status === "completed" && item.conclusion !== "success"
+                  );
+
+                  if (allCompleted || anyFailed) {
+                    ready = allSucceeded;
+                    break;
                   }
-                );
 
-                report = required.map((name) => {
-                  const matches = runs
-                    .filter((run) => run.name === name)
-                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                  const latest = matches[0];
-
-                  return {
-                    name,
-                    status: latest ? latest.status : "missing",
-                    conclusion: latest ? latest.conclusion || "in_progress" : "missing",
-                  };
-                });
-
-                const allCompleted = report.every((item) => item.status === "completed");
-                const allSucceeded = report.every((item) => item.conclusion === "success");
-                const anyFailed = report.some(
-                  (item) => item.status === "completed" && item.conclusion !== "success"
-                );
-
-                if (allCompleted || anyFailed) {
-                  ready = allSucceeded;
-                  break;
+                  await sleep(15000);
                 }
-
-                await sleep(15000);
+              } catch (error) {
+                report = required.map((name) => ({
+                  name,
+                  status: "api_error",
+                  conclusion: "api_error",
+                }));
+                ready = false;
+                core.warning(`Unable to query GitHub Actions workflow status for ${sha}: ${error.message}`);
               }
 
               if (!report.length || !report.every((item) => item.status === "completed")) {
