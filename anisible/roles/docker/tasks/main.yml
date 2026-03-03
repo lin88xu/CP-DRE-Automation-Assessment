@@ -1,7 +1,20 @@
+- name: Check whether Docker daemon is already reachable
+  ansible.builtin.command: docker info
+  register: docker_info_check
+  changed_when: false
+  failed_when: false
+
+- name: Check whether Docker Compose plugin is already available
+  ansible.builtin.command: docker compose version
+  register: docker_compose_check
+  changed_when: false
+  failed_when: false
+
 - name: Ensure python3-apt is available for Ansible apt modules
   ansible.builtin.raw: |
     python3 -c "import apt" >/dev/null 2>&1 || (apt-get update && apt-get install -y python3-apt)
   changed_when: false
+  when: docker_info_check.rc != 0 or docker_compose_check.rc != 0
 
 - name: Install Docker prerequisites
   ansible.builtin.raw: |
@@ -18,18 +31,22 @@
     fi
   register: docker_prereqs_install
   changed_when: "'changed' in docker_prereqs_install.stdout"
+  when: docker_info_check.rc != 0 or docker_compose_check.rc != 0
 
 - name: Check for a local Docker init script
   ansible.builtin.stat:
     path: /etc/init.d/docker
   register: docker_init_script
+  when: docker_info_check.rc != 0 or docker_compose_check.rc != 0
 
 - name: Ensure Docker service is enabled and running
   ansible.builtin.service:
     name: docker
     enabled: true
     state: started
-  when: docker_init_script.stat.exists
+  when:
+    - docker_info_check.rc != 0 or docker_compose_check.rc != 0
+    - docker_init_script.stat.exists
 
 - name: Verify Docker CLI can reach a daemon
   ansible.builtin.command: docker info
