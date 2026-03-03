@@ -5,15 +5,13 @@ on:
     paths:
       - ".github/workflows/observability-smoke.yml"
       - "promethusGrafana/**"
-      - "kong/docker-compose.yml"
-      - "kong/docker-kong.yml"
+      - "deployment/kong/**"
       - "README.md"
   pull_request:
     paths:
       - ".github/workflows/observability-smoke.yml"
       - "promethusGrafana/**"
-      - "kong/docker-compose.yml"
-      - "kong/docker-kong.yml"
+      - "deployment/kong/**"
       - "README.md"
   workflow_dispatch:
 
@@ -29,8 +27,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Create artifact directory
         run: mkdir -p ci-artifacts/observability
@@ -39,8 +35,8 @@ jobs:
         id: kong_config
         run: |
           docker compose \
-            --project-directory kong \
-            -f kong/docker-compose.yml \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
             config > ci-artifacts/observability/kong-compose-config.log
 
       - name: Validate observability compose file
@@ -55,8 +51,8 @@ jobs:
         id: kong_up
         run: |
           docker compose \
-            --project-directory kong \
-            -f kong/docker-compose.yml \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
             up -d
 
       - name: Wait for Kong Admin API and metrics
@@ -166,8 +162,8 @@ jobs:
         if: always()
         run: |
           docker compose \
-            --project-directory kong \
-            -f kong/docker-compose.yml \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
             logs --no-color > ci-artifacts/observability/kong-logs.log || true
 
       - name: Record observability logs
@@ -221,8 +217,8 @@ jobs:
         if: always()
         run: |
           docker compose \
-            --project-directory kong \
-            -f kong/docker-compose.yml \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
             down -v
 
       - name: Stop observability stack

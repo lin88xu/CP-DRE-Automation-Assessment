@@ -71,17 +71,19 @@ Prometheus -> Grafana
 │   ├── inventories/
 │   ├── playbooks/
 │   └── roles/
+├── deployment/
+│   └── kong/
+│       ├── docker-compose.yml
+│       └── docker-kong.yml
 ├── promethusGrafana/
 │   ├── prometheus/
 │   └── grafana/
 └── kong/
-    ├── docker-compose.yml
-    ├── docker-kong.yml
     ├── Makefile.docker
     └── kong-init.sh
 ```
 
-Note: the repository uses the existing directory names `anisible/` and `promethusGrafana/`.
+Note: the repository uses the existing directory names `anisible/` and `promethusGrafana/`. The `kong/` directory is a git submodule for Kong source, while the local smoke-test compose files live under `deployment/kong/`.
 
 ## Deliverables Mapping
 
@@ -94,6 +96,7 @@ This repository contains the required deliverables from the assessment brief:
   [.github/workflows/ansible-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/ansible-ci.yml),
   [.github/workflows/observability-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/observability-smoke.yml)
 - Application and automation code:
+  [deployment/kong/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/deployment/kong),
   [kong/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/kong),
   [anisible/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible),
   [promethusGrafana/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana)
