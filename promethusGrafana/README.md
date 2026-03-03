@@ -8,7 +8,7 @@ This directory contains a local observability stack for the Kong assessment.
 - `prometheus/prometheus.yml`: scrape configuration
 - `prometheus/rules/kong-alerts.yml`: starter alert rules
 - `grafana/provisioning/...`: datasource and dashboard provisioning
-- `grafana/dashboards/kong-overview.json`: starter Kong dashboard
+- `../kong/kong/plugins/prometheus/grafana/`: Kong Grafana dashboards mounted into `/etc/grafana/dashboards`
 
 ## Default Access
 
@@ -24,6 +24,8 @@ The stack expects Kong metrics to be available on:
 
 This repository enables the Kong `prometheus` plugin in the declarative config so the Admin API can expose those metrics.
 
+Kong does not emit separate metric names for "RPS per route" or "RPS per service". Those views come from the `service` and `route` labels on the shared request and latency metrics, and they only show data after traffic passes through Kong.
+
 ## Start
 
 ```bash
@@ -37,4 +39,3 @@ docker-compose up -d
 cd promethusGrafana
 docker-compose down
 ```
-

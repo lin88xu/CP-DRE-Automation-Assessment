@@ -1,0 +1,140 @@
+groups:
+  - name: kong-recording-rules
+    rules:
+      - record: kong:up
+        expr: max(up{job="${observability_kong_job_name}",scrape_target="kong"})
+
+      - record: kong:datastore_reachable
+        expr: max(kong_datastore_reachable)
+
+      - record: kong:control_plane_connected
+        expr: max(kong_control_plane_connected)
+
+      - record: kong:rps:rate5m
+        expr: sum(rate(kong_http_requests_total[5m]))
+
+      - record: kong:errors_4xx:rps:rate5m
+        expr: sum(rate(kong_http_requests_total{code=~"4.."}[5m]))
+
+      - record: kong:errors_5xx:rps:rate5m
+        expr: sum(rate(kong_http_requests_total{code=~"5.."}[5m]))
+
+      - record: kong:error_ratio_4xx:rate5m
+        expr: sum(rate(kong_http_requests_total{code=~"4.."}[5m])) / clamp_min(sum(rate(kong_http_requests_total[5m])), 0.001)
+
+      - record: kong:error_ratio_5xx:rate5m
+        expr: sum(rate(kong_http_requests_total{code=~"5.."}[5m])) / clamp_min(sum(rate(kong_http_requests_total[5m])), 0.001)
+
+      - record: kong:bandwidth_ingress:rate5m
+        expr: sum(rate(kong_bandwidth_bytes{direction="ingress"}[5m]))
+
+      - record: kong:bandwidth_egress:rate5m
+        expr: sum(rate(kong_bandwidth_bytes{direction="egress"}[5m]))
+
+      - record: kong:p95_gateway_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_kong_latency_ms_bucket[5m])) by (le))
+
+      - record: kong:p95_upstream_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_upstream_latency_ms_bucket[5m])) by (le))
+
+      - record: kong:p95_request_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_request_latency_ms_bucket[5m])) by (le))
+
+      - record: kong:connections:state
+        expr: sum by (state) (kong_nginx_connections_total)
+
+      - record: kong:timers:state
+        expr: sum by (state) (kong_nginx_timers)
+
+      - record: kong:nginx_requests_total
+        expr: sum(kong_nginx_requests_total)
+
+      - record: kong:memory_workers_lua_vms_bytes
+        expr: sum(kong_memory_workers_lua_vms_bytes)
+
+      - record: kong:memory_shared_dict_bytes
+        expr: sum(kong_memory_lua_shared_dict_bytes)
+
+      - record: kong:memory_shared_dict_total_bytes
+        expr: sum(kong_memory_lua_shared_dict_total_bytes)
+
+      - record: kong:memory_shared_dict_utilization:ratio
+        expr: sum(kong_memory_lua_shared_dict_bytes) / clamp_min(sum(kong_memory_lua_shared_dict_total_bytes), 1)
+
+      - record: shared_dict:kong:utilization:ratio
+        expr: sum by (shared_dict) (kong_memory_lua_shared_dict_bytes) / clamp_min(sum by (shared_dict) (kong_memory_lua_shared_dict_total_bytes), 1)
+
+      - record: service:kong:rps:rate5m
+        expr: sum by (service) (rate(kong_http_requests_total[5m]))
+
+      - record: route:kong:rps:rate5m
+        expr: sum by (route) (rate(kong_http_requests_total[5m]))
+
+      - record: consumer:kong:rps:rate5m
+        expr: sum by (consumer) (rate(kong_http_requests_total{consumer!=""}[5m]))
+
+      - record: service_code:kong:rps:rate5m
+        expr: sum by (service, code) (rate(kong_http_requests_total[5m]))
+
+      - record: route_code:kong:rps:rate5m
+        expr: sum by (route, code) (rate(kong_http_requests_total[5m]))
+
+      - record: service_source:kong:rps:rate5m
+        expr: sum by (service, source) (rate(kong_http_requests_total[5m]))
+
+      - record: service:kong:error_ratio_5xx:rate5m
+        expr: sum by (service) (rate(kong_http_requests_total{code=~"5.."}[5m])) / clamp_min(sum by (service) (rate(kong_http_requests_total[5m])), 0.001)
+
+      - record: route:kong:error_ratio_5xx:rate5m
+        expr: sum by (route) (rate(kong_http_requests_total{code=~"5.."}[5m])) / clamp_min(sum by (route) (rate(kong_http_requests_total[5m])), 0.001)
+
+      - record: service:kong:p95_gateway_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_kong_latency_ms_bucket[5m])) by (service, le))
+
+      - record: service:kong:p95_upstream_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_upstream_latency_ms_bucket[5m])) by (service, le))
+
+      - record: service:kong:p95_request_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_request_latency_ms_bucket[5m])) by (service, le))
+
+      - record: route:kong:p95_gateway_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_kong_latency_ms_bucket[5m])) by (route, le))
+
+      - record: route:kong:p95_upstream_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_upstream_latency_ms_bucket[5m])) by (route, le))
+
+      - record: route:kong:p95_request_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_request_latency_ms_bucket[5m])) by (route, le))
+
+      - record: service_direction:kong:bandwidth_bytes:rate5m
+        expr: sum by (service, direction) (rate(kong_bandwidth_bytes[5m]))
+
+      - record: route_direction:kong:bandwidth_bytes:rate5m
+        expr: sum by (route, direction) (rate(kong_bandwidth_bytes[5m]))
+
+      - record: consumer_direction:kong:bandwidth_bytes:rate5m
+        expr: sum by (consumer, direction) (rate(kong_bandwidth_bytes{consumer!=""}[5m]))
+
+      - record: upstream:kong:target_health
+        expr: sum by (upstream, target, address, state) (kong_upstream_target_health)
+
+      - record: kong:ai_requests:rps:rate5m
+        expr: sum(rate(kong_ai_llm_requests_total[5m]))
+
+      - record: kong:ai_cost:rate5m
+        expr: sum(rate(kong_ai_llm_cost_total[5m]))
+
+      - record: kong:ai_tokens:rate5m
+        expr: sum(rate(kong_ai_llm_tokens_total[5m]))
+
+      - record: kong:ai_provider_latency_p95_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_ai_llm_provider_latency_ms_bucket[5m])) by (le))
+
+      - record: ai_provider:kong:requests:rps:rate5m
+        expr: sum by (ai_provider, ai_model, cache_status) (rate(kong_ai_llm_requests_total[5m]))
+
+      - record: ai_provider:kong:tokens:rate5m
+        expr: sum by (ai_provider, ai_model, token_type) (rate(kong_ai_llm_tokens_total[5m]))
+
+      - record: ai_provider:kong:p95_latency_ms:5m
+        expr: histogram_quantile(0.95, sum(rate(kong_ai_llm_provider_latency_ms_bucket[5m])) by (ai_provider, ai_model, cache_status, le))

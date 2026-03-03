@@ -2,6 +2,8 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_partition" "current" {}
+
 data "aws_region" "current" {}
 
 data "aws_iam_policy_document" "ecs_task_assume_role" {
@@ -11,6 +13,17 @@ data "aws_iam_policy_document" "ecs_task_assume_role" {
     principals {
       type        = "Service"
       identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "grafana_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["grafana.amazonaws.com"]
     }
   }
 }
@@ -25,13 +38,129 @@ locals {
     app_host_header = var.app_host_header
     upstream_url    = var.upstream_url
   })
-  kong_container_name  = "${var.name_prefix}-kong"
-  kong_config_string   = local.docker_kong
-  ecs_resource_id      = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.this.name}"
-  proxy_resource_label = "${aws_lb.this.arn_suffix}/${aws_lb_target_group.proxy.arn_suffix}"
+  kong_container_name    = "${var.name_prefix}-kong"
+  kong_config_string     = local.docker_kong
+  ecs_resource_id        = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.this.name}"
+  proxy_resource_label   = "${aws_lb.this.arn_suffix}/${aws_lb_target_group.proxy.arn_suffix}"
+  amp_workspace_alias    = "${var.name_prefix}-amp"
+  grafana_workspace_name = "${var.name_prefix}-grafana"
+  amp_alert_rules = templatefile("${path.module}/../../templates/amp-kong-alerts.yml.tftpl", {
+    observability_kong_job_name = var.observability_kong_job_name
+  })
+  amp_recording_rules = templatefile("${path.module}/../../templates/amp-kong-recording-rules.yml.tftpl", {
+    observability_kong_job_name = var.observability_kong_job_name
+  })
+  amp_remote_write_endpoint = var.enable_managed_observability ? "${aws_prometheus_workspace.this[0].prometheus_endpoint}api/v1/remote_write" : null
   common_tags = merge(var.tags, {
     ManagedBy = "Terraform"
   })
+  kong_container_definition = {
+    name      = local.kong_container_name
+    image     = var.kong_image
+    essential = true
+    portMappings = [
+      {
+        containerPort = 8000
+        hostPort      = 8000
+        protocol      = "tcp"
+      },
+      {
+        containerPort = 8001
+        hostPort      = 8001
+        protocol      = "tcp"
+      },
+      {
+        containerPort = 8002
+        hostPort      = 8002
+        protocol      = "tcp"
+      }
+    ]
+    environment = [
+      { name = "KONG_DATABASE", value = "off" },
+      { name = "KONG_PROXY_ACCESS_LOG", value = "/dev/stdout" },
+      { name = "KONG_PROXY_ERROR_LOG", value = "/dev/stderr" },
+      { name = "KONG_PROXY_LISTEN", value = "0.0.0.0:8000" },
+      { name = "KONG_ADMIN_ACCESS_LOG", value = "/dev/stdout" },
+      { name = "KONG_ADMIN_ERROR_LOG", value = "/dev/stderr" },
+      { name = "KONG_ADMIN_LISTEN", value = "0.0.0.0:8001" },
+      { name = "KONG_ADMIN_GUI_URL", value = "http://${aws_lb.this.dns_name}:${var.manager_port}" },
+      { name = "KONG_ADMIN_GUI_LISTEN", value = "0.0.0.0:8002" },
+      { name = "KONG_ADMIN_GUI_AUTH", value = "basic-auth" },
+      { name = "KONG_ADMIN_GUI_AUTH_CONF", value = "{\"secret\":\"kong-secret\"}" },
+      { name = "KONG_ADMIN_GUI_SESSION_CONF", value = "{\"secret\":\"kong-session-secret\"}" },
+      { name = "KONG_ENFORCE_RBAC", value = "off" },
+      { name = "KONG_LOG_LEVEL", value = "info" },
+      { name = "KONG_PREFIX", value = "/usr/local/kong" },
+      { name = "KONG_DECLARATIVE_CONFIG_STRING", value = local.kong_config_string }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.kong.name
+        awslogs-region        = data.aws_region.current.name
+        awslogs-stream-prefix = "kong"
+      }
+    }
+  }
+  amp_collector_config = var.enable_managed_observability ? yamlencode({
+    global = {
+      scrape_interval     = var.observability_scrape_interval
+      evaluation_interval = var.observability_scrape_interval
+    }
+    scrape_configs = [
+      {
+        job_name     = var.observability_kong_job_name
+        metrics_path = "/metrics"
+        static_configs = [
+          {
+            targets = ["127.0.0.1:8001"]
+            labels = {
+              environment   = "managed"
+              scrape_target = "kong"
+            }
+          }
+        ]
+      }
+    ]
+    remote_write = [
+      {
+        url = local.amp_remote_write_endpoint
+        sigv4 = {
+          region = data.aws_region.current.name
+        }
+      }
+    ]
+  }) : null
+  amp_collector_bootstrap = var.enable_managed_observability ? join("\n", [
+    "cat <<'EOF' >/tmp/prometheus.yaml",
+    local.amp_collector_config,
+    "EOF",
+    "exec /bin/prometheus \\",
+    "  --config.file=/tmp/prometheus.yaml \\",
+    "  --storage.tsdb.path=/prometheus \\",
+    "  --enable-feature=agent"
+  ]) : null
+  amp_collector_container_definition = var.enable_managed_observability ? {
+    name      = "${var.name_prefix}-amp-collector"
+    image     = var.observability_prometheus_image
+    essential = true
+    dependsOn = [
+      {
+        containerName = local.kong_container_name
+        condition     = "START"
+      }
+    ]
+    entryPoint = ["/bin/sh", "-ec"]
+    command    = [local.amp_collector_bootstrap]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.kong.name
+        awslogs-region        = data.aws_region.current.name
+        awslogs-stream-prefix = "amp-collector"
+      }
+    }
+  } : null
 }
 
 resource "aws_vpc" "this" {
@@ -276,6 +405,40 @@ resource "aws_cloudwatch_log_group" "kong" {
   })
 }
 
+resource "aws_prometheus_workspace" "this" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  alias = local.amp_workspace_alias
+
+  tags = merge(local.common_tags, {
+    Name = local.amp_workspace_alias
+  })
+}
+
+resource "aws_prometheus_rule_group_namespace" "alerts" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  workspace_id = aws_prometheus_workspace.this[0].id
+  name         = "kong-alerts"
+  data         = local.amp_alert_rules
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-alerts"
+  })
+}
+
+resource "aws_prometheus_rule_group_namespace" "recording" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  workspace_id = aws_prometheus_workspace.this[0].id
+  name         = "kong-recording-rules"
+  data         = local.amp_recording_rules
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-recording-rules"
+  })
+}
+
 resource "aws_iam_role" "execution" {
   name               = "${var.name_prefix}-execution-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
@@ -288,6 +451,60 @@ resource "aws_iam_role" "execution" {
 resource "aws_iam_role_policy_attachment" "execution" {
   role       = aws_iam_role.execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_role" "task" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  name               = "${var.name_prefix}-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-task-role"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "task_amp_remote_write" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  role       = aws_iam_role.task[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonPrometheusRemoteWriteAccess"
+}
+
+resource "aws_iam_role" "grafana" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  name               = "${var.name_prefix}-grafana-role"
+  assume_role_policy = data.aws_iam_policy_document.grafana_assume_role.json
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-grafana-role"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "grafana_amp_query" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  role       = aws_iam_role.grafana[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonPrometheusQueryAccess"
+}
+
+resource "aws_grafana_workspace" "this" {
+  count = var.enable_managed_observability ? 1 : 0
+
+  name                     = local.grafana_workspace_name
+  description              = "Managed Grafana workspace for Kong observability."
+  account_access_type      = "CURRENT_ACCOUNT"
+  authentication_providers = ["AWS_SSO"]
+  permission_type          = "CUSTOMER_MANAGED"
+  role_arn                 = aws_iam_role.grafana[0].arn
+  data_sources             = ["PROMETHEUS"]
+
+  tags = merge(local.common_tags, {
+    Name = local.grafana_workspace_name
+  })
+
+  depends_on = [aws_iam_role_policy_attachment.grafana_amp_query]
 }
 
 resource "aws_ecs_cluster" "this" {
@@ -305,57 +522,12 @@ resource "aws_ecs_task_definition" "this" {
   cpu                      = tostring(var.task_cpu)
   memory                   = tostring(var.task_memory)
   execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = var.enable_managed_observability ? aws_iam_role.task[0].arn : null
 
-  container_definitions = jsonencode([
-    {
-      name      = local.kong_container_name
-      image     = var.kong_image
-      essential = true
-      portMappings = [
-        {
-          containerPort = 8000
-          hostPort      = 8000
-          protocol      = "tcp"
-        },
-        {
-          containerPort = 8001
-          hostPort      = 8001
-          protocol      = "tcp"
-        },
-        {
-          containerPort = 8002
-          hostPort      = 8002
-          protocol      = "tcp"
-        }
-      ]
-      environment = [
-        { name = "KONG_DATABASE", value = "off" },
-        { name = "KONG_PROXY_ACCESS_LOG", value = "/dev/stdout" },
-        { name = "KONG_PROXY_ERROR_LOG", value = "/dev/stderr" },
-        { name = "KONG_PROXY_LISTEN", value = "0.0.0.0:8000" },
-        { name = "KONG_ADMIN_ACCESS_LOG", value = "/dev/stdout" },
-        { name = "KONG_ADMIN_ERROR_LOG", value = "/dev/stderr" },
-        { name = "KONG_ADMIN_LISTEN", value = "0.0.0.0:8001" },
-        { name = "KONG_ADMIN_GUI_URL", value = "http://${aws_lb.this.dns_name}:${var.manager_port}" },
-        { name = "KONG_ADMIN_GUI_LISTEN", value = "0.0.0.0:8002" },
-        { name = "KONG_ADMIN_GUI_AUTH", value = "basic-auth" },
-        { name = "KONG_ADMIN_GUI_AUTH_CONF", value = "{\"secret\":\"kong-secret\"}" },
-        { name = "KONG_ADMIN_GUI_SESSION_CONF", value = "{\"secret\":\"kong-session-secret\"}" },
-        { name = "KONG_ENFORCE_RBAC", value = "off" },
-        { name = "KONG_LOG_LEVEL", value = "info" },
-        { name = "KONG_PREFIX", value = "/usr/local/kong" },
-        { name = "KONG_DECLARATIVE_CONFIG_STRING", value = local.kong_config_string }
-      ]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = aws_cloudwatch_log_group.kong.name
-          awslogs-region        = data.aws_region.current.name
-          awslogs-stream-prefix = "kong"
-        }
-      }
-    }
-  ])
+  container_definitions = jsonencode(concat(
+    [local.kong_container_definition],
+    var.enable_managed_observability ? [local.amp_collector_container_definition] : []
+  ))
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-task"
@@ -398,7 +570,9 @@ resource "aws_ecs_service" "this" {
     aws_lb_listener.proxy,
     aws_lb_listener.admin,
     aws_lb_listener.manager,
-    aws_iam_role_policy_attachment.execution
+    aws_iam_role_policy_attachment.execution,
+    aws_prometheus_rule_group_namespace.alerts,
+    aws_prometheus_rule_group_namespace.recording
   ]
 
   tags = merge(local.common_tags, {
