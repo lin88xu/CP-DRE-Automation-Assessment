@@ -1,13 +1,9 @@
 name: AWS Deploy
 
 on:
-  workflow_run:
-    workflows:
-      - Terraform CI
-      - Ansible CI
-      - Observability Smoke
-    types:
-      - completed
+  push:
+    branches:
+      - release/aws-observability
   workflow_dispatch:
 
 permissions:
@@ -15,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aws-deploy-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  group: aws-deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -28,12 +24,7 @@ jobs:
   gate:
     name: Wait For Required Workflows
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push'
-      )
+    timeout-minutes: 25
     outputs:
       ready: ${{ steps.check.outputs.ready }}
       sha: ${{ steps.check.outputs.sha }}
@@ -47,10 +38,11 @@ jobs:
           script: |
             const required = ["Terraform CI", "Ansible CI", "Observability Smoke"];
             const targetBranch = "release/aws-observability";
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
             let sha = context.sha;
             let branch = context.ref.replace("refs/heads/", "");
-            let ready = false;
+            let ready = branch === targetBranch;
             let report = [];
 
             if (context.eventName === "workflow_dispatch") {
@@ -60,35 +52,59 @@ jobs:
                 conclusion: "manual-dispatch",
               }));
             } else {
-              sha = context.payload.workflow_run.head_sha;
-              branch = context.payload.workflow_run.head_branch;
+              if (branch !== targetBranch) {
+                ready = false;
+              } else {
+                const deadline = Date.now() + 20 * 60 * 1000;
 
-              const runs = await github.paginate(
-                github.rest.actions.listWorkflowRunsForRepo,
-                {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  head_sha: sha,
-                  per_page: 100,
+                while (Date.now() < deadline) {
+                  const runs = await github.paginate(
+                    github.rest.actions.listWorkflowRunsForRepo,
+                    {
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      head_sha: sha,
+                      per_page: 100,
+                    }
+                  );
+
+                  report = required.map((name) => {
+                    const matches = runs
+                      .filter((run) => run.name === name)
+                      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    const latest = matches[0];
+
+                    return {
+                      name,
+                      status: latest ? latest.status : "missing",
+                      conclusion: latest ? latest.conclusion || "in_progress" : "missing",
+                      url: latest ? latest.html_url : "",
+                    };
+                  });
+
+                  const allCompleted = report.every((item) => item.status === "completed");
+                  const allSucceeded = report.every((item) => item.conclusion === "success");
+
+                  if (allCompleted || !allSucceeded) {
+                    ready = allSucceeded;
+                    break;
+                  }
+
+                  await sleep(15000);
                 }
-              );
 
-              report = required.map((name) => {
-                const completed = runs
-                  .filter((run) => run.name === name && run.status === "completed")
-                  .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                const latest = completed[0];
-
-                return {
-                  name,
-                  conclusion: latest ? latest.conclusion : "missing",
-                  url: latest ? latest.html_url : "",
-                };
-              });
-
-              ready =
-                branch === targetBranch &&
-                report.every((item) => item.conclusion === "success");
+                if (!report.length) {
+                  report = required.map((name) => ({
+                    name,
+                    status: "missing",
+                    conclusion: "missing",
+                    url: "",
+                  }));
+                  ready = false;
+                } else if (!report.every((item) => item.status === "completed")) {
+                  ready = false;
+                }
+              }
             }
 
             core.setOutput("ready", ready ? "true" : "false");
@@ -101,9 +117,10 @@ jobs:
               .addTable([
                 [
                   { data: "Workflow", header: true },
+                  { data: "Status", header: true },
                   { data: "Conclusion", header: true },
                 ],
-                ...report.map((item) => [item.name, item.conclusion]),
+                ...report.map((item) => [item.name, item.status || "-", item.conclusion]),
               ])
               .addRaw(`\nReady to deploy: \`${ready}\`\n`)
               .write();
