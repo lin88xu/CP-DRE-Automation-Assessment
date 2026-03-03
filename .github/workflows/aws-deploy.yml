@@ -163,6 +163,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.ready == 'true'
     timeout-minutes: 35
+    environment: aws
     outputs:
       config_version_id: ${{ steps.remote_plan.outputs.config_version_id }}
       workspace_id: ${{ steps.remote_plan.outputs.workspace_id }}
