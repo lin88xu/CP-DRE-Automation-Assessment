@@ -1,0 +1,115 @@
+.PHONY: help docker-up docker-down docker-logs docker-ps docker-reset docker-init docker-restart docker-status test-proxy
+
+help:
+	@echo "╔════════════════════════════════════════════════════════════════╗"
+	@echo "║          Kong Gateway Docker Deployment Commands              ║"
+	@echo "╚════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Available commands:"
+	@echo ""
+	@echo "  docker-up              Start Kong and PostgreSQL containers"
+	@echo "  docker-down            Stop and remove all containers"
+	@echo "  docker-restart         Restart all services"
+	@echo "  docker-reset           Reset everything (delete volumes, DB, containers)"
+	@echo "  docker-logs            Show logs from all services"
+	@echo "  docker-ps              Show running containers"
+	@echo "  docker-init            Initialize Kong with sample data"
+	@echo "  docker-status          Check Kong health status"
+	@echo "  test-proxy             Test the Kong proxy with sample request"
+	@echo ""
+	@echo "Access Points:"
+	@echo "  Proxy:                 http://localhost:8000"
+	@echo "  Admin API:             http://localhost:8001"
+	@echo "  Manager UI:            http://localhost:8002"
+	@echo ""
+
+docker-up:
+	@echo "Starting Kong Gateway and PostgreSQL..."
+	docker-compose up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 15
+	@echo "✓ Kong is starting up..."
+	# use $(MAKE) with -f to ensure we invoke the same makefile
+	@$(MAKE) -f $(MAKEFILE_LIST) docker-status
+
+docker-down:
+	@echo "Stopping Kong Gateway and PostgreSQL..."
+	docker-compose down
+	@echo "✓ Services stopped"
+
+docker-restart:
+	@echo "Restarting all services..."
+	docker-compose restart
+	@echo "Waiting for services to be ready..."
+	@sleep 10
+	@$(MAKE) -f $(MAKEFILE_LIST) docker-status
+
+docker-reset:
+	@echo "⚠️  This will delete all Kong and database data!"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		docker-compose down -v; \
+		echo "✓ All data removed"; \
+	fi
+
+docker-logs:
+	docker-compose logs -f
+
+docker-ps:
+	@echo "Running containers:"
+	@docker-compose ps
+
+docker-init:
+	@echo "Initializing Kong with sample configuration..."
+	@bash ./kong-init.sh
+
+docker-status:
+	@echo "Checking Kong services..."
+	@curl -s -f http://localhost:8001/status && echo " ✓ Admin API is healthy" || echo "✗ Admin API not responding"
+	@curl -s -o /dev/null -w "✓ Proxy API responding with HTTP %{http_code}\n" http://localhost:8000 || echo "✗ Proxy API not responding"
+	@curl -s -o /dev/null -w "✓ Manager UI responding with HTTP %{http_code}\n" http://localhost:8002 || echo "✗ Manager UI not responding"
+
+test-proxy:
+	@echo "Testing Kong proxy..."
+	@echo "Getting Kong version info..."
+	@curl -s http://localhost:8001/status | jq '.version'
+	@echo ""
+	@echo "Creating test request..."
+	@curl -X GET "http://localhost:8000/get" \
+		-H "Host: example.com" \
+		-v || echo "Note: This will fail if no routes are configured. Run 'make docker-init' first."
+
+# Development convenience targets
+dev-build:
+	@echo "Building Kong from source (this may take a while)..."
+	cd kong && make install
+
+dev-test:
+	@echo "Running Kong tests..."
+	cd kong && make test
+
+dev-shell:
+	@echo "Opening Kong container shell..."
+	docker-compose exec kong /bin/sh
+
+db-shell:
+	@echo "Opening PostgreSQL container shell..."
+	docker-compose exec kong-db psql -U kong -d kong
+
+# Admin API examples
+admin-services:
+	@echo "Listing all services..."
+	@curl -s http://localhost:8001/services | jq '.'
+
+admin-routes:
+	@echo "Listing all routes..."
+	@curl -s http://localhost:8001/routes | jq '.'
+
+admin-plugins:
+	@echo "Listing all plugins..."
+	@curl -s http://localhost:8001/plugins | jq '.'
+
+admin-consumers:
+	@echo "Listing all consumers..."
+	@curl -s http://localhost:8001/consumers | jq '.'
