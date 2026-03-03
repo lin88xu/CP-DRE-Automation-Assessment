@@ -2,7 +2,7 @@ groups:
   - name: kong-health
     rules:
       - alert: KongAdminMetricsUnavailable
-        expr: up{job="{{ observability_kong_job_name }}",scrape_target="kong"} == 0
+        expr: up{job="${observability_kong_job_name}",scrape_target="kong"} == 0
         for: 2m
         labels:
           severity: critical

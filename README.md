@@ -236,6 +236,7 @@ Important signals:
   Why it matters: operators need to know whether the management plane is reachable.
 - Kong request metrics
   Why it matters: confirms live traffic and exposes service behavior.
+  Note: per-route and per-service views are derived from labels on `kong_http_requests_total`, `kong_kong_latency_ms`, `kong_upstream_latency_ms`, `kong_request_latency_ms`, and `kong_bandwidth_bytes`; those series appear only after proxy traffic hits Kong.
 - Kong latency metrics
   Why it matters: high latency is often the first sign of upstream or resource stress.
 - Nginx connection metrics
@@ -249,7 +250,7 @@ Relevant files:
 
 - [promethusGrafana/prometheus/prometheus.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana/prometheus/prometheus.yml)
 - [promethusGrafana/prometheus/rules/kong-alerts.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana/prometheus/rules/kong-alerts.yml)
-- [promethusGrafana/grafana/dashboards/kong-overview.json](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana/grafana/dashboards/kong-overview.json)
+- [kong-official.json](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/kong/kong/plugins/prometheus/grafana/kong-official.json)
 
 Operator investigation path:
 
