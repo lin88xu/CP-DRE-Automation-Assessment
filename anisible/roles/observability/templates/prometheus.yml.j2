@@ -18,5 +18,4 @@ scrape_configs:
           - {{ observability_scrape_host }}:{{ observability_scrape_port }}
         labels:
           environment: managed
-          service: kong
-
+          scrape_target: kong

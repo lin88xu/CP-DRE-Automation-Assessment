@@ -32,14 +32,15 @@ GitHub Actions
         |
         v
 Terraform
-  - local Docker
+  - local host handoff
   - AWS ECS/Fargate
   - Azure single-host VM
         |
         v
 Deployment Layer
   - AWS: ECS task definition + ALB
-  - Local/Azure: Ansible + Docker Compose
+  - Local: Terraform handoff -> Ansible + Docker Compose
+  - Azure: Ansible + Docker Compose
         |
         v
 Kong Gateway
@@ -58,6 +59,7 @@ Prometheus -> Grafana
 ├── README.md
 ├── .github/workflows/
 │   ├── ansible-ci.yml
+│   ├── local-deployment-e2e.yml
 │   ├── observability-smoke.yml
 │   └── terraform-ci.yml
 ├── terraform/
@@ -94,6 +96,7 @@ This repository contains the required deliverables from the assessment brief:
 - CI/CD pipeline configuration:
   [.github/workflows/terraform-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/terraform-ci.yml),
   [.github/workflows/ansible-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/ansible-ci.yml),
+  [.github/workflows/local-deployment-e2e.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/local-deployment-e2e.yml),
   [.github/workflows/observability-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/observability-smoke.yml)
 - Application and automation code:
   [deployment/kong/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/deployment/kong),
@@ -105,7 +108,7 @@ This repository contains the required deliverables from the assessment brief:
 
 Terraform supports three targets:
 
-- `terraform/environments/local`: deploys Kong resources to the local Docker daemon
+- `terraform/environments/local`: prepares the local host handoff for Ansible and validates Docker availability
 - `terraform/environments/aws`: provisions an AWS ECS/Fargate environment with an Application Load Balancer and ECS service autoscaling for Kong
 - `terraform/environments/azure`: provisions a single-host Azure environment and boots Kong with Docker Compose
 
@@ -145,7 +148,8 @@ Ansible provides the configuration-management layer:
 
 Scope note:
 
-- Ansible is used for the local and Azure host-based deployment paths.
+- Ansible is the deployment layer for the local and Azure host-based paths.
+- The local path uses Terraform to generate the Ansible inventory and variables handoff before Ansible deploys Kong and observability.
 - The AWS target is container-native and packages Kong directly into ECS/Fargate with Terraform.
 
 Key files:
@@ -163,6 +167,8 @@ The GitHub Actions workflows implement the validation side of the GitOps path:
   [.github/workflows/terraform-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/terraform-ci.yml)
 - Ansible lint and syntax check:
   [.github/workflows/ansible-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/ansible-ci.yml)
+- Local host-based deployment validation:
+  [.github/workflows/local-deployment-e2e.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/local-deployment-e2e.yml)
 - Kong and observability smoke test:
   [.github/workflows/observability-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/observability-smoke.yml)
 
@@ -170,6 +176,9 @@ Current pipeline stages demonstrated:
 
 - Validate Terraform formatting and configuration
 - Validate Ansible playbooks and roles
+- Run Terraform `init`, `validate`, `plan`, and apply the local handoff layer
+- Run the local Ansible deployment layer on `localhost` using Terraform-generated inventory and variables
+- Verify Kong serves proxy and Admin traffic after deployment
 - Boot Kong locally in CI
 - Boot Prometheus and Grafana locally in CI
 - Verify Grafana health
@@ -249,14 +258,61 @@ Failure scenarios covered by the design:
 
 ## Local Usage
 
-Direct local runtime:
+Terraform handoff plus Ansible deployment:
 
 ```bash
-cd kong
-docker compose up -d
+cd terraform/environments/local
+terraform init
+terraform apply
 ```
 
-Observability stack:
+```bash
+cd <repo-root>/anisible
+
+ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
+ansible-playbook \
+  -K \
+  -i ../terraform/environments/local/generated/hosts.yml \
+  playbooks/site.yml \
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+```
+
+Replace `<repo-root>` with the directory where you cloned this repository. For example, that might be `/home/<user>/CP-DRE-Automation-Assessment` on Linux, or `/mnt/c/.../CP-DRE-Automation-Assessment` under WSL if the repo lives on a Windows-mounted drive.
+
+If you run the repository from WSL under `/mnt/c/...`, Ansible treats that path as world-writable and ignores the local `ansible.cfg` unless `ANSIBLE_CONFIG` is set explicitly. If you prefer not to rely on `ansible.cfg`, use:
+
+```bash
+cd <repo-root>/anisible
+
+ANSIBLE_ROLES_PATH=<repo-root>/anisible/roles \
+ansible-playbook \
+  -K \
+  -i ../terraform/environments/local/generated/hosts.yml \
+  playbooks/site.yml \
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+```
+
+For local runs, `-K` prompts for the sudo password used by `become`, which is required because the playbook installs packages and writes under `/opt`.
+
+To stop the Ansible-managed local deployment and remove its containers and volumes:
+
+```bash
+cd <repo-root>/anisible
+
+ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
+ansible-playbook \
+  -K \
+  -i ../terraform/environments/local/generated/hosts.yml \
+  playbooks/teardown.yml \
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+```
+
+Direct smoke-test runtime:
+
+```bash
+cd deployment/kong
+docker compose up -d
+```
 
 ```bash
 cd promethusGrafana
