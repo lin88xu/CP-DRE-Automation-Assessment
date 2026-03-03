@@ -1,0 +1,54 @@
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs and runtime artifacts
+*.log
+logs/
+tmp/
+*.pid
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
+
+# Ansible
+*.retry
+
+# Test/cache
+.coverage
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# Container artifacts
+*.tar
