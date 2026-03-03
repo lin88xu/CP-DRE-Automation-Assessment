@@ -8,7 +8,7 @@ This directory contains a local observability stack for the Kong assessment.
 - `prometheus/prometheus.yml`: scrape configuration
 - `prometheus/rules/kong-alerts.yml`: starter alert rules
 - `grafana/provisioning/...`: datasource and dashboard provisioning
-- `../kong/kong/plugins/prometheus/grafana/kong-official.json`: official Kong Grafana dashboard mounted into `/etc/grafana/dashboards`
+- `../kong/kong/plugins/prometheus/grafana/`: Kong Grafana dashboards mounted into `/etc/grafana/dashboards`
 
 ## Default Access
 

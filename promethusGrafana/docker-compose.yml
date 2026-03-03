@@ -28,8 +28,7 @@ services:
       - "3000:3000"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/etc/grafana/dashboards:ro
-      - ../kong/kong/plugins/prometheus/grafana/kong-official.json:/etc/grafana/dashboards/kong-official.json:ro
+      - ../kong/kong/plugins/prometheus/grafana:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
