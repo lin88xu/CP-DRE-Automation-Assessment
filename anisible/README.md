@@ -8,6 +8,26 @@ This directory provides the configuration-management layer for the assessment.
 - Deploys the Kong stack to `/opt/kong`
 - Deploys the Prometheus and Grafana stack to `/opt/observability`
 
+## Prerequisites
+
+To run these playbooks locally, ensure the control machine has:
+
+- `python3`
+- `pip`
+- `ansible` / `ansible-playbook`
+- `terraform` for the local handoff flow
+- `docker` and `docker compose`
+- `sudo` access for `become`
+
+Recommended checks:
+
+```bash
+ansible-playbook --version
+terraform version
+docker version
+docker compose version
+```
+
 ## Layout
 
 ```text

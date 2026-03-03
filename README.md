@@ -8,6 +8,34 @@ The same deployment model is intended to work across:
 - AWS
 - Azure
 
+## Prerequisites
+
+Before running the local deployment flow yourself, make sure these are installed on the machine where you will run Terraform and Ansible:
+
+- `git`
+- `docker` with `docker compose` available
+- `terraform`
+- `python3`
+- `pip`
+- `ansible` / `ansible-playbook`
+
+Local deployment assumptions:
+
+- Docker daemon is running and your user can access it
+- You have `sudo` access for the Ansible `become` steps
+- Internet access is available to pull container images and packages
+- If you run from WSL under `/mnt/c/...`, Ansible may ignore the local `ansible.cfg` unless `ANSIBLE_CONFIG` is set explicitly
+
+Useful preflight checks:
+
+```bash
+docker version
+docker compose version
+terraform version
+ansible-playbook --version
+python3 --version
+```
+
 ## Architecture Overview
 
 The solution is organized as a layered delivery model:
