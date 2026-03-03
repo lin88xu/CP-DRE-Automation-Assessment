@@ -35,18 +35,27 @@ jobs:
 
       - name: Validate Kong compose file
         id: kong_config
-        working-directory: kong
-        run: docker compose config > ../ci-artifacts/observability/kong-compose-config.log
+        run: |
+          docker compose \
+            --project-directory kong \
+            -f kong/docker-compose.yml \
+            config > ci-artifacts/observability/kong-compose-config.log
 
       - name: Validate observability compose file
         id: observability_config
-        working-directory: promethusGrafana
-        run: docker compose config > ../ci-artifacts/observability/observability-compose-config.log
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            config > ci-artifacts/observability/observability-compose-config.log
 
       - name: Start Kong stack
         id: kong_up
-        working-directory: kong
-        run: docker compose up -d
+        run: |
+          docker compose \
+            --project-directory kong \
+            -f kong/docker-compose.yml \
+            up -d
 
       - name: Wait for Kong Admin API and metrics
         id: kong_metrics
@@ -79,8 +88,11 @@ jobs:
 
       - name: Start observability stack
         id: observability_up
-        working-directory: promethusGrafana
-        run: docker compose up -d
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            up -d
 
       - name: Wait for Prometheus and Grafana
         id: observability_checks
@@ -150,13 +162,19 @@ jobs:
 
       - name: Record Kong logs
         if: always()
-        working-directory: kong
-        run: docker compose logs --no-color > ../ci-artifacts/observability/kong-logs.log || true
+        run: |
+          docker compose \
+            --project-directory kong \
+            -f kong/docker-compose.yml \
+            logs --no-color > ci-artifacts/observability/kong-logs.log || true
 
       - name: Record observability logs
         if: always()
-        working-directory: promethusGrafana
-        run: docker compose logs --no-color > ../ci-artifacts/observability/observability-logs.log || true
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            logs --no-color > ci-artifacts/observability/observability-logs.log || true
 
       - name: Write smoke test summary
         if: always()
@@ -199,10 +217,16 @@ jobs:
 
       - name: Stop Kong stack
         if: always()
-        working-directory: kong
-        run: docker compose down -v
+        run: |
+          docker compose \
+            --project-directory kong \
+            -f kong/docker-compose.yml \
+            down -v
 
       - name: Stop observability stack
         if: always()
-        working-directory: promethusGrafana
-        run: docker compose down -v
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            down -v
