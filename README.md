@@ -225,10 +225,11 @@ Safe change practices included:
 
 AWS deployment workflow prerequisites:
 
-- GitHub Actions secret `AWS_ACCESS_KEY_ID`
-- GitHub Actions secret `AWS_SECRET_ACCESS_KEY`
 - GitHub Actions secret `TF_API_TOKEN`
-- Optional repository or environment variable `AWS_REGION` (defaults to `ap-southeast-1`)
+- HCP Terraform workspace `cp-dre-aws` must exist in organization `CP-DRE` or the values set in `TFC_ORGANIZATION` and `TFC_AWS_WORKSPACE`
+- HCP Terraform workspace `cp-dre-aws` must use remote execution mode with operations enabled
+- AWS provider credentials must be configured as environment variables or variable set entries in the HCP Terraform workspace, not in GitHub Actions
+- Optional repository or environment variables `TFC_ORGANIZATION` and `TFC_AWS_WORKSPACE`
 - Optional GitHub Environment named `aws` if you want approval gates on the apply job
 
 ## Observability Approach
@@ -384,7 +385,7 @@ Validated locally in this workspace:
 
 Known limitation from local validation:
 
-- Real AWS `terraform plan` and `terraform apply` still depend on valid cloud credentials, HCP Terraform access, and repository secrets being configured in GitHub Actions.
+- The AWS deployment workflow now creates remote HCP Terraform runs, so successful GitHub execution still depends on valid HCP Terraform workspace configuration and AWS credentials being present in that workspace.
 
 ## Tradeoffs And Assumptions
 

@@ -15,10 +15,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TF_IN_AUTOMATION: "true"
-  TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
-  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
-  TF_VAR_aws_region: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  TFC_HOST: app.terraform.io
+  TFC_ORGANIZATION: ${{ vars.TFC_ORGANIZATION || 'CP-DRE' }}
+  TFC_WORKSPACE: ${{ vars.TFC_AWS_WORKSPACE || 'cp-dre-aws' }}
+  TFC_TOKEN: ${{ secrets.TF_API_TOKEN }}
 
 jobs:
   gate:
@@ -49,64 +49,54 @@ jobs:
               ready = true;
               report = required.map((name) => ({
                 name,
+                status: "manual-dispatch",
                 conclusion: "manual-dispatch",
               }));
+            } else if (branch !== targetBranch) {
+              ready = false;
             } else {
-              if (branch !== targetBranch) {
-                ready = false;
-              } else {
-                const deadline = Date.now() + 20 * 60 * 1000;
+              const deadline = Date.now() + 20 * 60 * 1000;
 
-                while (Date.now() < deadline) {
-                  const runs = await github.paginate(
-                    github.rest.actions.listWorkflowRunsForRepo,
-                    {
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      head_sha: sha,
-                      per_page: 100,
-                    }
-                  );
-
-                  report = required.map((name) => {
-                    const matches = runs
-                      .filter((run) => run.name === name)
-                      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                    const latest = matches[0];
-
-                    return {
-                      name,
-                      status: latest ? latest.status : "missing",
-                      conclusion: latest ? latest.conclusion || "in_progress" : "missing",
-                      url: latest ? latest.html_url : "",
-                    };
-                  });
-
-                  const allCompleted = report.every((item) => item.status === "completed");
-                  const allSucceeded = report.every((item) => item.conclusion === "success");
-                  const anyFailed = report.some(
-                    (item) => item.status === "completed" && item.conclusion !== "success"
-                  );
-
-                  if (allCompleted || anyFailed) {
-                    ready = allSucceeded;
-                    break;
+              while (Date.now() < deadline) {
+                const runs = await github.paginate(
+                  github.rest.actions.listWorkflowRunsForRepo,
+                  {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    head_sha: sha,
+                    per_page: 100,
                   }
+                );
 
-                  await sleep(15000);
-                }
+                report = required.map((name) => {
+                  const matches = runs
+                    .filter((run) => run.name === name)
+                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                  const latest = matches[0];
 
-                if (!report.length) {
-                  report = required.map((name) => ({
+                  return {
                     name,
-                    status: "missing",
-                    conclusion: "missing",
-                    url: "",
-                  }));
-                  ready = false;
-                } else if (!report.every((item) => item.status === "completed")) {
-                  ready = false;
+                    status: latest ? latest.status : "missing",
+                    conclusion: latest ? latest.conclusion || "in_progress" : "missing",
+                  };
+                });
+
+                const allCompleted = report.every((item) => item.status === "completed");
+                const allSucceeded = report.every((item) => item.conclusion === "success");
+                const anyFailed = report.some(
+                  (item) => item.status === "completed" && item.conclusion !== "success"
+                );
+
+                if (allCompleted || anyFailed) {
+                  ready = allSucceeded;
+                  break;
                 }
+
+                await sleep(15000);
+              }
+
+              if (!report.length || !report.every((item) => item.status === "completed")) {
+                ready = false;
               }
             }
 
@@ -139,7 +129,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: gate
     if: needs.gate.outputs.ready == 'true'
-    timeout-minutes: 30
+    timeout-minutes: 35
+    outputs:
+      config_version_id: ${{ steps.remote_plan.outputs.config_version_id }}
+      workspace_id: ${{ steps.remote_plan.outputs.workspace_id }}
+      plan_run_id: ${{ steps.remote_plan.outputs.plan_run_id }}
+      plan_run_url: ${{ steps.remote_plan.outputs.plan_run_url }}
 
     steps:
       - name: Checkout repository
@@ -147,39 +142,82 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.sha || github.sha }}
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Ensure AWS tfvars file exists
-        working-directory: terraform/environments/aws
-        run: |
-          if [ ! -f terraform.tfvars ]; then
-            cp terraform.tfvars.example terraform.tfvars
-          fi
-
       - name: Create artifact directory
         run: mkdir -p ci-artifacts/aws-deploy
 
-      - name: Run Terraform init
-        working-directory: terraform/environments/aws
-        run: terraform init -input=false -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-deploy/init.log"
+      - name: Package AWS Terraform configuration
+        run: |
+          tar \
+            --exclude='.terraform' \
+            --exclude='*.tfstate' \
+            --exclude='*.tfstate.*' \
+            -C terraform/environments/aws \
+            -czf ci-artifacts/aws-deploy/aws-config.tar.gz \
+            .
 
-      - name: Run Terraform validate
-        working-directory: terraform/environments/aws
-        run: terraform validate -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-deploy/validate.log"
+      - name: Queue remote Terraform plan in HCP Terraform
+        id: remote_plan
+        run: |
+          set -euo pipefail
 
-      - name: Run Terraform plan
-        working-directory: terraform/environments/aws
-        run: terraform plan -input=false -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-deploy/plan.log"
+          python3 .github/scripts/hcp_terraform_api.py workspace-info \
+            --organization "$TFC_ORGANIZATION" \
+            --workspace "$TFC_WORKSPACE" \
+            > ci-artifacts/aws-deploy/workspace.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          workspace = json.loads(Path("ci-artifacts/aws-deploy/workspace.json").read_text())
+          if workspace.get("execution_mode") != "remote":
+              raise SystemExit(
+                  f"HCP Terraform workspace {workspace['name']} must use remote execution mode, "
+                  f"got {workspace.get('execution_mode')!r}"
+              )
+          if workspace.get("operations") is False:
+              raise SystemExit(
+                  f"HCP Terraform workspace {workspace['name']} has operations disabled."
+              )
+          PY
+
+          python3 .github/scripts/hcp_terraform_api.py create-config-version \
+            --workspace-id "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-deploy/workspace.json"))["id"])')" \
+            > ci-artifacts/aws-deploy/config-version.json
+
+          python3 .github/scripts/hcp_terraform_api.py upload-config \
+            --upload-url "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-deploy/config-version.json"))["upload_url"])')" \
+            --archive ci-artifacts/aws-deploy/aws-config.tar.gz
+
+          python3 .github/scripts/hcp_terraform_api.py create-run \
+            --workspace-id "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-deploy/workspace.json"))["id"])')" \
+            --config-version-id "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-deploy/config-version.json"))["id"])')" \
+            --message "GitHub Actions remote plan for ${{ needs.gate.outputs.sha || github.sha }}" \
+            --plan-only \
+            > ci-artifacts/aws-deploy/plan-run.json
+
+          python3 .github/scripts/hcp_terraform_api.py wait-run \
+            --run-id "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-deploy/plan-run.json"))["id"])')" \
+            --success-status planned_and_finished \
+            --timeout 1800 \
+            > ci-artifacts/aws-deploy/plan-run-final.json
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          workspace = json.loads(Path("ci-artifacts/aws-deploy/workspace.json").read_text())
+          config_version = json.loads(Path("ci-artifacts/aws-deploy/config-version.json").read_text())
+          plan_run = json.loads(Path("ci-artifacts/aws-deploy/plan-run.json").read_text())
+          plan_run_url = f"https://{os.environ['TFC_HOST'].rstrip('/')}/app/{os.environ['TFC_ORGANIZATION']}/{os.environ['TFC_WORKSPACE']}/runs/{plan_run['id']}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"workspace_id={workspace['id']}\n")
+              handle.write(f"config_version_id={config_version['id']}\n")
+              handle.write(f"plan_run_id={plan_run['id']}\n")
+              handle.write(f"plan_run_url={plan_run_url}\n")
+          PY
 
       - name: Write plan summary
         run: |
@@ -188,8 +226,8 @@ jobs:
             echo
             echo "- Branch: \`${{ needs.gate.outputs.branch || github.ref_name }}\`"
             echo "- Commit: \`${{ needs.gate.outputs.sha || github.sha }}\`"
-            echo "- Provider-level plan check: PASS"
-            echo "- Apply step will only run after this successful plan job."
+            echo "- HCP Terraform workspace: \`${{ env.TFC_WORKSPACE }}\`"
+            echo "- Remote plan run: ${{ steps.remote_plan.outputs.plan_run_url }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload deploy plan logs
@@ -216,39 +254,77 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.sha || github.sha }}
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Ensure AWS tfvars file exists
-        working-directory: terraform/environments/aws
-        run: |
-          if [ ! -f terraform.tfvars ]; then
-            cp terraform.tfvars.example terraform.tfvars
-          fi
-
       - name: Create artifact directory
         run: mkdir -p ci-artifacts/aws-apply
 
-      - name: Run Terraform init
-        working-directory: terraform/environments/aws
-        run: terraform init -input=false -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-apply/init.log"
+      - name: Queue remote Terraform apply in HCP Terraform
+        id: remote_apply
+        run: |
+          set -euo pipefail
 
-      - name: Apply AWS environment
-        working-directory: terraform/environments/aws
-        run: terraform apply -input=false -auto-approve -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-apply/apply.log"
+          python3 .github/scripts/hcp_terraform_api.py create-run \
+            --workspace-id "${{ needs.terraform-plan.outputs.workspace_id }}" \
+            --config-version-id "${{ needs.terraform-plan.outputs.config_version_id }}" \
+            --message "GitHub Actions remote apply for ${{ needs.gate.outputs.sha || github.sha }}" \
+            > ci-artifacts/aws-apply/apply-run.json
 
-      - name: Capture Terraform outputs
-        working-directory: terraform/environments/aws
-        run: terraform output -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-apply/outputs.log"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          apply_run = json.loads(Path("ci-artifacts/aws-apply/apply-run.json").read_text())
+          apply_run_url = f"https://{os.environ['TFC_HOST'].rstrip('/')}/app/{os.environ['TFC_ORGANIZATION']}/{os.environ['TFC_WORKSPACE']}/runs/{apply_run['id']}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"apply_run_id={apply_run['id']}\n")
+              handle.write(f"apply_run_url={apply_run_url}\n")
+          PY
+
+          python3 .github/scripts/hcp_terraform_api.py wait-run \
+            --run-id "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-apply/apply-run.json"))["id"])')" \
+            --success-status planned_and_finished \
+            --allow-confirmable \
+            --timeout 1800 \
+            > ci-artifacts/aws-apply/apply-run-wait.json
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          wait_data = json.loads(Path("ci-artifacts/aws-apply/apply-run-wait.json").read_text())
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"awaiting_apply={'true' if wait_data['result'] == 'confirmable' else 'false'}\n")
+          if wait_data["result"] == "confirmable":
+              raise SystemExit(10)
+          PY
+        continue-on-error: true
+
+      - name: Fail on unexpected remote apply preparation error
+        if: steps.remote_apply.outcome == 'failure' && steps.remote_apply.outputs.awaiting_apply != 'true'
+        run: |
+          echo "HCP Terraform apply run did not reach a confirmable state."
+          exit 1
+
+      - name: Apply confirmable HCP Terraform run
+        if: steps.remote_apply.outputs.awaiting_apply == 'true'
+        run: |
+          set -euo pipefail
+
+          python3 .github/scripts/hcp_terraform_api.py apply-run \
+            --run-id "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-apply/apply-run.json"))["id"])')"
+
+      - name: Wait for remote Terraform apply completion
+        if: steps.remote_apply.outcome == 'success' || steps.remote_apply.outputs.awaiting_apply == 'true'
+        run: |
+          set -euo pipefail
+
+          python3 .github/scripts/hcp_terraform_api.py wait-run \
+            --run-id "$(python3 -c 'import json; print(json.load(open("ci-artifacts/aws-apply/apply-run.json"))["id"])')" \
+            --success-status applied,planned_and_finished \
+            --timeout 2400 \
+            > ci-artifacts/aws-apply/apply-run-final.json
 
       - name: Write apply summary
         run: |
@@ -257,8 +333,8 @@ jobs:
             echo
             echo "- Branch: \`${{ needs.gate.outputs.branch || github.ref_name }}\`"
             echo "- Commit: \`${{ needs.gate.outputs.sha || github.sha }}\`"
-            echo "- Deployment target: \`terraform/environments/aws\`"
-            echo "- Apply status: PASS"
+            echo "- HCP Terraform workspace: \`${{ env.TFC_WORKSPACE }}\`"
+            echo "- Remote apply run: ${{ steps.remote_apply.outputs.apply_run_url }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload apply logs
