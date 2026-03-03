@@ -1,0 +1,7 @@
+profile: basic
+exclude_paths:
+  - inventories/aws/hosts.yml.example
+  - inventories/azure/hosts.yml.example
+skip_list:
+  - command-instead-of-module
+

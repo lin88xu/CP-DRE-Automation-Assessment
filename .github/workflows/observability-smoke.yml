@@ -1,0 +1,230 @@
+name: Observability Smoke
+
+on:
+  push:
+    paths:
+      - ".github/workflows/observability-smoke.yml"
+      - "promethusGrafana/**"
+      - "deployment/kong/**"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/observability-smoke.yml"
+      - "promethusGrafana/**"
+      - "deployment/kong/**"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Observability Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Create artifact directory
+        run: mkdir -p ci-artifacts/observability
+
+      - name: Validate Kong compose file
+        id: kong_config
+        run: |
+          docker compose \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
+            config > ci-artifacts/observability/kong-compose-config.log
+
+      - name: Validate observability compose file
+        id: observability_config
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            config > ci-artifacts/observability/observability-compose-config.log
+
+      - name: Start Kong stack
+        id: kong_up
+        run: |
+          docker compose \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
+            up -d
+
+      - name: Wait for Kong Admin API and metrics
+        id: kong_metrics
+        run: |
+          python3 - <<'PY'
+          import time
+          import urllib.request
+
+          def wait_for(url, needle=None, timeout=120):
+              deadline = time.time() + timeout
+              while time.time() < deadline:
+                  try:
+                      with urllib.request.urlopen(url, timeout=5) as response:
+                          body = response.read().decode()
+                      if needle is None or needle in body:
+                          return body
+                  except Exception:
+                      pass
+                  time.sleep(2)
+              raise SystemExit(f"Timed out waiting for {url}")
+
+          status = wait_for("http://localhost:8001/status")
+          metrics = wait_for("http://localhost:8001/metrics", "kong_")
+
+          with open("ci-artifacts/observability/kong-status.json", "w", encoding="utf-8") as handle:
+              handle.write(status)
+          with open("ci-artifacts/observability/kong-metrics.txt", "w", encoding="utf-8") as handle:
+              handle.write(metrics)
+          PY
+
+      - name: Start observability stack
+        id: observability_up
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            up -d
+
+      - name: Wait for Prometheus and Grafana
+        id: observability_checks
+        run: |
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          def fetch_json(url):
+              with urllib.request.urlopen(url, timeout=5) as response:
+                  return json.loads(response.read().decode())
+
+          deadline = time.time() + 180
+          grafana_payload = None
+          targets_payload = None
+
+          while time.time() < deadline:
+              try:
+                  grafana_payload = fetch_json("http://localhost:3000/api/health")
+              except Exception:
+                  grafana_payload = None
+
+              try:
+                  targets_payload = fetch_json("http://localhost:9090/api/v1/targets")
+              except Exception:
+                  targets_payload = None
+
+              grafana_ok = grafana_payload is not None and grafana_payload.get("database") == "ok"
+              prometheus_ok = False
+              if targets_payload is not None:
+                  active = targets_payload.get("data", {}).get("activeTargets", [])
+                  prometheus_ok = any(
+                      target.get("labels", {}).get("job") == "kong-admin"
+                      and target.get("health") == "up"
+                      for target in active
+                  )
+
+              if grafana_ok and prometheus_ok:
+                  break
+
+              time.sleep(3)
+
+          if grafana_payload is not None:
+              with open("ci-artifacts/observability/grafana-health.json", "w", encoding="utf-8") as handle:
+                  json.dump(grafana_payload, handle, indent=2)
+          if targets_payload is not None:
+              with open("ci-artifacts/observability/prometheus-targets.json", "w", encoding="utf-8") as handle:
+                  json.dump(targets_payload, handle, indent=2)
+
+          if grafana_payload is None or grafana_payload.get("database") != "ok":
+              raise SystemExit("Grafana health check failed")
+
+          active = targets_payload.get("data", {}).get("activeTargets", []) if targets_payload else []
+          prometheus_ok = any(
+              target.get("labels", {}).get("job") == "kong-admin"
+              and target.get("health") == "up"
+              for target in active
+          )
+          if not prometheus_ok:
+              raise SystemExit("Prometheus never observed kong-admin as up")
+          PY
+
+      - name: Record container status
+        if: always()
+        run: docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' > ci-artifacts/observability/docker-ps.log
+
+      - name: Record Kong logs
+        if: always()
+        run: |
+          docker compose \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
+            logs --no-color > ci-artifacts/observability/kong-logs.log || true
+
+      - name: Record observability logs
+        if: always()
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            logs --no-color > ci-artifacts/observability/observability-logs.log || true
+
+      - name: Write smoke test summary
+        if: always()
+        env:
+          KONG_CONFIG: ${{ steps.kong_config.conclusion }}
+          OBSERVABILITY_CONFIG: ${{ steps.observability_config.conclusion }}
+          KONG_METRICS: ${{ steps.kong_metrics.conclusion }}
+          OBSERVABILITY_CHECKS: ${{ steps.observability_checks.conclusion }}
+        run: |
+          status_text() {
+            if [ "$1" = "success" ]; then
+              printf 'PASS'
+            elif [ "$1" = "skipped" ] || [ -z "$1" ]; then
+              printf 'SKIP'
+            else
+              printf 'FAIL'
+            fi
+          }
+
+          {
+            echo "## Observability Smoke Test Summary"
+            echo
+            echo "| Check | Status |"
+            echo "| --- | --- |"
+            echo "| Kong compose config | $(status_text "$KONG_CONFIG") |"
+            echo "| Observability compose config | $(status_text "$OBSERVABILITY_CONFIG") |"
+            echo "| Kong metrics endpoint | $(status_text "$KONG_METRICS") |"
+            echo "| Grafana health and Prometheus scrape | $(status_text "$OBSERVABILITY_CHECKS") |"
+            echo
+            echo "Artifacts: \`observability-smoke-logs\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload smoke test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-smoke-logs
+          path: ci-artifacts/observability
+          if-no-files-found: error
+
+      - name: Stop Kong stack
+        if: always()
+        run: |
+          docker compose \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
+            down -v
+
+      - name: Stop observability stack
+        if: always()
+        run: |
+          docker compose \
+            --project-directory promethusGrafana \
+            -f promethusGrafana/docker-compose.yml \
+            down -v
