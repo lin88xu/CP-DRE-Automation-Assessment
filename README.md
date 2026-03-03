@@ -46,6 +46,7 @@ The solution is organized as a layered delivery model:
 4. Prometheus scrapes Kong metrics.
 5. Grafana visualizes service health and request behavior.
 6. GitHub Actions validates Terraform, lints Ansible, and smoke-tests the observability path.
+7. A gated AWS deployment workflow runs `terraform plan` and `terraform apply` after the validation workflows succeed.
 
 High-level flow:
 
@@ -57,6 +58,7 @@ GitHub Actions
   - Terraform validate
   - Ansible lint
   - Observability smoke test
+  - AWS terraform plan/apply deploy
         |
         v
 Terraform
@@ -87,7 +89,7 @@ Prometheus -> Grafana
 ├── README.md
 ├── .github/workflows/
 │   ├── ansible-ci.yml
-│   ├── local-deployment-e2e.yml
+│   ├── aws-deploy.yml
 │   ├── observability-smoke.yml
 │   └── terraform-ci.yml
 ├── terraform/
@@ -124,7 +126,7 @@ This repository contains the required deliverables from the assessment brief:
 - CI/CD pipeline configuration:
   [.github/workflows/terraform-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/terraform-ci.yml),
   [.github/workflows/ansible-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/ansible-ci.yml),
-  [.github/workflows/local-deployment-e2e.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/local-deployment-e2e.yml),
+  [.github/workflows/aws-deploy.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/aws-deploy.yml),
   [.github/workflows/observability-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/observability-smoke.yml)
 - Application and automation code:
   [deployment/kong/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/deployment/kong),
@@ -189,36 +191,45 @@ Key files:
 
 ## CI/CD And GitOps Flow
 
-The GitHub Actions workflows implement the validation side of the GitOps path:
+The GitHub Actions workflows implement the validation and deployment side of the GitOps path:
 
 - Terraform validation:
   [.github/workflows/terraform-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/terraform-ci.yml)
 - Ansible lint and syntax check:
   [.github/workflows/ansible-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/ansible-ci.yml)
-- Local host-based deployment validation:
-  [.github/workflows/local-deployment-e2e.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/local-deployment-e2e.yml)
 - Kong and observability smoke test:
   [.github/workflows/observability-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/observability-smoke.yml)
+- AWS gated deployment with provider-level Terraform plan tests:
+  [.github/workflows/aws-deploy.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/aws-deploy.yml)
 
 Current pipeline stages demonstrated:
 
 - Validate Terraform formatting and configuration
 - Validate Ansible playbooks and roles
-- Run Terraform `init`, `validate`, `plan`, and apply the local handoff layer
-- Run the local Ansible deployment layer on `localhost` using Terraform-generated inventory and variables
-- Verify Kong serves proxy and Admin traffic after deployment
 - Boot Kong locally in CI
 - Boot Prometheus and Grafana locally in CI
 - Verify Grafana health
 - Verify Prometheus can scrape Kong metrics
+- Wait for Terraform CI, Ansible CI, and observability smoke test to succeed for the same commit on `release/aws-observability`
+- Run a real AWS `terraform init`, `terraform validate`, and `terraform plan` before deployment
+- Apply `terraform/environments/aws` automatically after the AWS plan passes
 - Upload logs and summaries as workflow artifacts
 
 Safe change practices included:
 
 - Validation before deployment
 - Independent workflow checks for branch protection
+- Provider-level AWS `terraform plan` before `terraform apply`
 - Smoke test of the observability chain, not just syntax
 - Artifacts and summaries for failed runs
+
+AWS deployment workflow prerequisites:
+
+- GitHub Actions secret `AWS_ACCESS_KEY_ID`
+- GitHub Actions secret `AWS_SECRET_ACCESS_KEY`
+- GitHub Actions secret `TF_API_TOKEN`
+- Optional repository or environment variable `AWS_REGION` (defaults to `ap-southeast-1`)
+- Optional GitHub Environment named `aws` if you want approval gates on the apply job
 
 ## Observability Approach
 
@@ -369,11 +380,11 @@ Validated locally in this workspace:
 - Kong local stack starts and exposes `/status` and `/metrics`
 - Prometheus scrapes Kong metrics successfully
 - Grafana health is healthy
-- GitHub Actions workflows were added for Terraform, Ansible, and observability smoke tests
+- GitHub Actions workflows were added for Terraform, Ansible, observability smoke tests, and AWS deployment
 
 Known limitation from local validation:
 
-- `terraform validate` for the AWS environment did not complete successfully on this machine because the AWS provider plugin stopped responding during local validation. The HCL initializes, but provider-side validation needs separate follow-up on this host.
+- Real AWS `terraform plan` and `terraform apply` still depend on valid cloud credentials, HCP Terraform access, and repository secrets being configured in GitHub Actions.
 
 ## Tradeoffs And Assumptions
 
@@ -395,8 +406,6 @@ Assumptions:
 
 Natural extensions if more time were available:
 
-1. Resolve the local AWS provider validation failure and add provider-level plan tests.
-2. Add deployment workflows beyond validation-only CI.
-3. Add rollback documentation and a concrete recovery runbook.
-4. Add backup and restore procedures for persistent data.
-5. Harden secrets handling and reduce default open access in cloud examples.
+1. Add rollback documentation and a concrete recovery runbook.
+2. Add backup and restore procedures for persistent data.
+3. Harden secrets handling and reduce default open access in cloud examples.

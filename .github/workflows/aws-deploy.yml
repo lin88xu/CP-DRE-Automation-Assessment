@@ -1,0 +1,250 @@
+name: AWS Deploy
+
+on:
+  workflow_run:
+    workflows:
+      - Terraform CI
+      - Ansible CI
+      - Observability Smoke
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: aws-deploy-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  TF_VAR_aws_region: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+
+jobs:
+  gate:
+    name: Wait For Required Workflows
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'
+      )
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+      sha: ${{ steps.check.outputs.sha }}
+      branch: ${{ steps.check.outputs.branch }}
+
+    steps:
+      - name: Check upstream workflow results for this commit
+        id: check
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const required = ["Terraform CI", "Ansible CI", "Observability Smoke"];
+            const targetBranch = "release/aws-observability";
+
+            let sha = context.sha;
+            let branch = context.ref.replace("refs/heads/", "");
+            let ready = false;
+            let report = [];
+
+            if (context.eventName === "workflow_dispatch") {
+              ready = true;
+              report = required.map((name) => ({
+                name,
+                conclusion: "manual-dispatch",
+              }));
+            } else {
+              sha = context.payload.workflow_run.head_sha;
+              branch = context.payload.workflow_run.head_branch;
+
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRunsForRepo,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  head_sha: sha,
+                  per_page: 100,
+                }
+              );
+
+              report = required.map((name) => {
+                const completed = runs
+                  .filter((run) => run.name === name && run.status === "completed")
+                  .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                const latest = completed[0];
+
+                return {
+                  name,
+                  conclusion: latest ? latest.conclusion : "missing",
+                  url: latest ? latest.html_url : "",
+                };
+              });
+
+              ready =
+                branch === targetBranch &&
+                report.every((item) => item.conclusion === "success");
+            }
+
+            core.setOutput("ready", ready ? "true" : "false");
+            core.setOutput("sha", sha);
+            core.setOutput("branch", branch);
+
+            await core.summary
+              .addHeading("AWS Deploy Gate")
+              .addRaw(`Target branch: \`${branch}\`\n\n`)
+              .addTable([
+                [
+                  { data: "Workflow", header: true },
+                  { data: "Conclusion", header: true },
+                ],
+                ...report.map((item) => [item.name, item.conclusion]),
+              ])
+              .addRaw(`\nReady to deploy: \`${ready}\`\n`)
+              .write();
+
+      - name: Stop when upstream workflows are incomplete
+        if: steps.check.outputs.ready != 'true'
+        run: |
+          echo "Required workflows for this commit are not all successful yet."
+          echo "This run exits without deploying."
+
+  terraform-plan:
+    name: Terraform Plan (AWS)
+    runs-on: ubuntu-latest
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.gate.outputs.sha || github.sha }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure AWS tfvars file exists
+        working-directory: terraform/environments/aws
+        run: |
+          if [ ! -f terraform.tfvars ]; then
+            cp terraform.tfvars.example terraform.tfvars
+          fi
+
+      - name: Create artifact directory
+        run: mkdir -p ci-artifacts/aws-deploy
+
+      - name: Run Terraform init
+        working-directory: terraform/environments/aws
+        run: terraform init -input=false -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-deploy/init.log"
+
+      - name: Run Terraform validate
+        working-directory: terraform/environments/aws
+        run: terraform validate -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-deploy/validate.log"
+
+      - name: Run Terraform plan
+        working-directory: terraform/environments/aws
+        run: terraform plan -input=false -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-deploy/plan.log"
+
+      - name: Write plan summary
+        run: |
+          {
+            echo "## AWS Terraform Plan Summary"
+            echo
+            echo "- Branch: \`${{ needs.gate.outputs.branch || github.ref_name }}\`"
+            echo "- Commit: \`${{ needs.gate.outputs.sha || github.sha }}\`"
+            echo "- Provider-level plan check: PASS"
+            echo "- Apply step will only run after this successful plan job."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deploy plan logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-deploy-plan-logs
+          path: ci-artifacts/aws-deploy
+          if-no-files-found: error
+
+  terraform-apply:
+    name: Terraform Apply (AWS)
+    runs-on: ubuntu-latest
+    needs:
+      - gate
+      - terraform-plan
+    if: needs.gate.outputs.ready == 'true' && needs.terraform-plan.result == 'success'
+    timeout-minutes: 45
+    environment: aws
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.gate.outputs.sha || github.sha }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure AWS tfvars file exists
+        working-directory: terraform/environments/aws
+        run: |
+          if [ ! -f terraform.tfvars ]; then
+            cp terraform.tfvars.example terraform.tfvars
+          fi
+
+      - name: Create artifact directory
+        run: mkdir -p ci-artifacts/aws-apply
+
+      - name: Run Terraform init
+        working-directory: terraform/environments/aws
+        run: terraform init -input=false -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-apply/init.log"
+
+      - name: Apply AWS environment
+        working-directory: terraform/environments/aws
+        run: terraform apply -input=false -auto-approve -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-apply/apply.log"
+
+      - name: Capture Terraform outputs
+        working-directory: terraform/environments/aws
+        run: terraform output -no-color | tee "$GITHUB_WORKSPACE/ci-artifacts/aws-apply/outputs.log"
+
+      - name: Write apply summary
+        run: |
+          {
+            echo "## AWS Terraform Apply Summary"
+            echo
+            echo "- Branch: \`${{ needs.gate.outputs.branch || github.ref_name }}\`"
+            echo "- Commit: \`${{ needs.gate.outputs.sha || github.sha }}\`"
+            echo "- Deployment target: \`terraform/environments/aws\`"
+            echo "- Apply status: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload apply logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-deploy-apply-logs
+          path: ci-artifacts/aws-apply
+          if-no-files-found: error
