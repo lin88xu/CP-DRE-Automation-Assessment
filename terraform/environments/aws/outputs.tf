@@ -1,8 +1,3 @@
-output "alb_dns_name" {
-  value       = module.kong.alb_dns_name
-  description = "Public DNS name of the Kong load balancer."
-}
-
 output "proxy_url" {
   value       = module.kong.proxy_url
   description = "Kong proxy URL."
@@ -18,12 +13,12 @@ output "manager_url" {
   description = "Kong Manager URL."
 }
 
-output "ecs_cluster_name" {
-  value       = module.kong.ecs_cluster_name
-  description = "ECS cluster name."
+output "grafana_workspace_url" {
+  value       = module.kong.grafana_workspace_url
+  description = "Amazon Managed Grafana workspace URL."
 }
 
-output "ecs_service_name" {
-  value       = module.kong.ecs_service_name
-  description = "ECS service name."
+output "grafana_kong_dashboard_url" {
+  value       = module.kong.grafana_kong_dashboard_url
+  description = "Direct URL to the imported Kong official dashboard in Amazon Managed Grafana."
 }

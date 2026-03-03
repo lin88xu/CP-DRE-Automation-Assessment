@@ -33,3 +33,8 @@ plugins:
       credentials: true
       max_age: 3600
   - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
