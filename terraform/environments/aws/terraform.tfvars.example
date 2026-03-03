@@ -1,0 +1,17 @@
+aws_region            = "ap-southeast-1"
+admin_cidr            = "0.0.0.0/0"
+subnet_cidr           = "10.20.1.0/24"
+secondary_subnet_cidr = "10.20.2.0/24"
+desired_count         = 1
+min_capacity          = 1
+max_capacity          = 4
+task_cpu              = 1024
+task_memory           = 2048
+cpu_target_value      = 60
+memory_target_value   = 70
+requests_target_value = 1000
+scale_in_cooldown     = 120
+scale_out_cooldown    = 60
+
+# Kong runs on ECS/Fargate behind an ALB in the AWS target.
+# Adjust the task size, scaling targets, or CIDR values here if your environment needs them.

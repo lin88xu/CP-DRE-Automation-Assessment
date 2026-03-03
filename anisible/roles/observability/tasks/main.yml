@@ -1,0 +1,56 @@
+- name: Create observability directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ observability_install_root }}"
+    - "{{ observability_install_root }}/prometheus"
+    - "{{ observability_install_root }}/prometheus/rules"
+    - "{{ observability_install_root }}/grafana"
+    - "{{ observability_install_root }}/grafana/provisioning"
+    - "{{ observability_install_root }}/grafana/provisioning/datasources"
+    - "{{ observability_install_root }}/grafana/provisioning/dashboards"
+    - "{{ observability_install_root }}/grafana/dashboards"
+
+- name: Render observability Docker Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ observability_install_root }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Render Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ observability_install_root }}/prometheus/prometheus.yml"
+    mode: "0644"
+
+- name: Render Prometheus alert rules
+  ansible.builtin.template:
+    src: kong-alerts.yml.j2
+    dest: "{{ observability_install_root }}/prometheus/rules/kong-alerts.yml"
+    mode: "0644"
+
+- name: Render Grafana datasource provisioning
+  ansible.builtin.template:
+    src: grafana-datasource.yml.j2
+    dest: "{{ observability_install_root }}/grafana/provisioning/datasources/prometheus.yml"
+    mode: "0644"
+
+- name: Render Grafana dashboard provisioning
+  ansible.builtin.template:
+    src: grafana-dashboards.yml.j2
+    dest: "{{ observability_install_root }}/grafana/provisioning/dashboards/dashboards.yml"
+    mode: "0644"
+
+- name: Render Grafana Kong overview dashboard
+  ansible.builtin.template:
+    src: kong-overview.json.j2
+    dest: "{{ observability_install_root }}/grafana/dashboards/kong-overview.json"
+    mode: "0644"
+
+- name: Start observability stack
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: "{{ observability_install_root }}"
+  changed_when: true

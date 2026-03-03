@@ -1,0 +1,13 @@
+- name: Configure Kong assessment host
+  hosts: kong_hosts
+  become: true
+  roles:
+    - role: docker
+      tags:
+        - docker
+    - role: kong
+      tags:
+        - kong
+    - role: observability
+      tags:
+        - observability

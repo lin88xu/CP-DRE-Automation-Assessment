@@ -1,0 +1,86 @@
+name: Ansible CI
+
+on:
+  push:
+    paths:
+      - ".github/workflows/ansible-ci.yml"
+      - "anisible/**"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/ansible-ci.yml"
+      - "anisible/**"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ansible-lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Ansible tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ansible-core ansible-lint
+
+      - name: Run Ansible checks
+        run: |
+          set +e
+          mkdir -p ci-artifacts/ansible
+
+          (
+            cd anisible
+            ansible-playbook -i inventories/local/hosts.yml --syntax-check playbooks/site.yml
+          ) > ci-artifacts/ansible/syntax-check.log 2>&1
+          syntax_status=$?
+
+          (
+            cd anisible
+            ansible-lint playbooks/site.yml
+          ) > ci-artifacts/ansible/ansible-lint.log 2>&1
+          lint_status=$?
+
+          {
+            echo "## Ansible Lint Summary"
+            echo
+            echo "| Check | Status |"
+            echo "| --- | --- |"
+            if [ "$syntax_status" -eq 0 ]; then
+              echo "| ansible-playbook --syntax-check | PASS |"
+            else
+              echo "| ansible-playbook --syntax-check | FAIL |"
+            fi
+            if [ "$lint_status" -eq 0 ]; then
+              echo "| ansible-lint | PASS |"
+            else
+              echo "| ansible-lint | FAIL |"
+            fi
+            echo
+            echo "Artifacts: \`ansible-logs\`"
+          } | tee ci-artifacts/ansible/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$syntax_status" -ne 0 ] || [ "$lint_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload Ansible logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-logs
+          path: ci-artifacts/ansible
+          if-no-files-found: error
+

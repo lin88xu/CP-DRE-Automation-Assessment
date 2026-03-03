@@ -1,0 +1,105 @@
+name: Terraform CI
+
+on:
+  push:
+    paths:
+      - ".github/workflows/terraform-ci.yml"
+      - "terraform/**"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/terraform-ci.yml"
+      - "terraform/**"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-validate:
+    name: Terraform Validate (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - local
+          - aws
+          - azure
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Create dummy SSH public key
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGithubActionsDummyKeyForValidationOnly ci@example' > "$RUNNER_TEMP/keys/id_ed25519.pub"
+
+      - name: Run Terraform checks
+        env:
+          TF_VAR_aws_region: us-east-1
+          TF_VAR_subscription_id: 00000000-0000-0000-0000-000000000000
+          TF_VAR_ssh_public_key_path: ${{ runner.temp }}/keys/id_ed25519.pub
+        run: |
+          set +e
+          mkdir -p ci-artifacts/terraform/${{ matrix.environment }}
+
+          terraform fmt -check -recursive terraform \
+            > ci-artifacts/terraform/${{ matrix.environment }}/fmt.log 2>&1
+          fmt_status=$?
+
+          (
+            cd terraform/environments/${{ matrix.environment }}
+            terraform init -backend=false
+          ) > ci-artifacts/terraform/${{ matrix.environment }}/init.log 2>&1
+          init_status=$?
+
+          (
+            cd terraform/environments/${{ matrix.environment }}
+            terraform validate
+          ) > ci-artifacts/terraform/${{ matrix.environment }}/validate.log 2>&1
+          validate_status=$?
+
+          {
+            echo "## Terraform Validation Summary (${{ matrix.environment }})"
+            echo
+            echo "| Check | Status |"
+            echo "| --- | --- |"
+            if [ "$fmt_status" -eq 0 ]; then
+              echo "| terraform fmt -check | PASS |"
+            else
+              echo "| terraform fmt -check | FAIL |"
+            fi
+            if [ "$init_status" -eq 0 ]; then
+              echo "| terraform init -backend=false | PASS |"
+            else
+              echo "| terraform init -backend=false | FAIL |"
+            fi
+            if [ "$validate_status" -eq 0 ]; then
+              echo "| terraform validate | PASS |"
+            else
+              echo "| terraform validate | FAIL |"
+            fi
+            echo
+            echo "Artifacts: \`terraform-${{ matrix.environment }}-logs\`"
+          } | tee ci-artifacts/terraform/${{ matrix.environment }}/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$fmt_status" -ne 0 ] || [ "$init_status" -ne 0 ] || [ "$validate_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload Terraform logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-${{ matrix.environment }}-logs
+          path: ci-artifacts/terraform/${{ matrix.environment }}
+          if-no-files-found: error
+

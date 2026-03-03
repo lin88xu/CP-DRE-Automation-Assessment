@@ -1,0 +1,35 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: sample-service
+    url: ${upstream_url}
+    routes:
+      - name: sample-route
+        hosts:
+          - ${app_host_header}
+        paths:
+          - /
+        methods:
+          - GET
+          - POST
+
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - OPTIONS
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - Origin
+      exposed_headers:
+        - X-Auth-Token
+      credentials: true
+      max_age: 3600
+  - name: prometheus

@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euxo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y ca-certificates curl docker.io docker-compose
+systemctl enable docker
+systemctl start docker
+
+mkdir -p /opt/kong
+
+cat >/opt/kong/docker-compose.yml <<'EOF'
+${docker_compose}
+EOF
+
+cat >/opt/kong/docker-kong.yml <<'EOF'
+${docker_kong}
+EOF
+
+cd /opt/kong
+docker-compose up -d

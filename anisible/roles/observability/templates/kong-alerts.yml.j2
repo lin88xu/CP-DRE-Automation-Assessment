@@ -1,0 +1,21 @@
+groups:
+  - name: kong-health
+    rules:
+      - alert: KongAdminMetricsUnavailable
+        expr: up{job="{{ observability_kong_job_name }}"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Kong metrics endpoint is down
+          description: Prometheus has not been able to scrape Kong Admin API metrics for 2 minutes.
+
+      - alert: KongTrafficMissing
+        expr: absent(kong_http_requests_total)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kong request metrics are missing
+          description: Kong is up but request metrics are absent, which usually means no traffic or a broken plugin or configuration.
+

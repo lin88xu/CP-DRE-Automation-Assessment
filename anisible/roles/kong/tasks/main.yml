@@ -1,0 +1,23 @@
+- name: Create Kong installation directory
+  ansible.builtin.file:
+    path: "{{ kong_install_root }}"
+    state: directory
+    mode: "0755"
+
+- name: Render Kong Docker Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ kong_install_root }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Render Kong declarative configuration
+  ansible.builtin.template:
+    src: docker-kong.yml.j2
+    dest: "{{ kong_install_root }}/docker-kong.yml"
+    mode: "0644"
+
+- name: Start Kong stack
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: "{{ kong_install_root }}"
+  changed_when: true
