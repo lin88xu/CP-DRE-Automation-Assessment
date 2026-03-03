@@ -84,8 +84,11 @@ jobs:
 
                   const allCompleted = report.every((item) => item.status === "completed");
                   const allSucceeded = report.every((item) => item.conclusion === "success");
+                  const anyFailed = report.some(
+                    (item) => item.status === "completed" && item.conclusion !== "success"
+                  );
 
-                  if (allCompleted || !allSucceeded) {
+                  if (allCompleted || anyFailed) {
                     ready = allSucceeded;
                     break;
                   }
