@@ -62,11 +62,13 @@ terraform init
 terraform apply
 ```
 
-After apply, Terraform prints the standard Kong URLs plus the managed observability outputs, including `grafana_workspace_url`, `grafana_kong_dashboard_url`, `amp_prometheus_endpoint`, and `amp_remote_write_url`.
+## Deployment Model
 
-The AWS target provisions an AMP workspace plus an AMG workspace. Because the pinned AWS provider only exposes the managed scraper for EKS sources, the ECS task includes a small Prometheus sidecar that scrapes Kong locally and remote-writes to AMP.
-If you want Terraform to grant Amazon Managed Grafana access automatically, set the IAM Identity Center user IDs and group IDs in `terraform/environments/aws/terraform.tfvars`. The AWS target supports separate Admin, Editor, and Viewer assignments for both users and groups.
-Terraform also bootstraps the AMG workspace by creating an AMP-backed Prometheus data source and importing the `Kong (official)` dashboard.
+- `local`: Terraform validates the local Docker host and generates the inventory and variables that Ansible uses for deployment.
+- `aws`: Terraform creates a VPC, public subnets, an Application Load Balancer, an ECS/Fargate service for Kong, Amazon Managed Service for Prometheus, Amazon Managed Grafana, and target-tracking autoscaling based on CPU, memory, and proxy request load.
+- `azure`: Terraform creates a resource group, network, and a single Ubuntu VM, then bootstraps Docker and runs Kong with Docker Compose.
+
+This is intentionally lightweight for the assessment. Local uses a Terraform-to-Ansible handoff, AWS uses ECS/Fargate with managed observability, and Azure stays on a single VM to keep the packaging understandable across targets.
 
 ## AWS Verification
 
@@ -94,9 +96,9 @@ for i in $(seq 1 20); do
 done
 ```
 
-3. Wait 1 to 2 minutes for the ECS Prometheus sidecar to scrape Kong and remote-write into AMP.
+The AWS target provisions an AMP workspace plus an AMG workspace. Because the pinned AWS provider only exposes the managed scraper for EKS sources, the ECS task includes a small Prometheus sidecar that scrapes Kong locally and remote-writes to AMP.
 
-4. Open the Grafana workspace URL:
+Azure:
 
 ```bash
 terraform output -raw grafana_workspace_url
@@ -116,29 +118,9 @@ Expected result:
 
 If metrics do not appear, check the ECS task logs in CloudWatch under `/ecs/<name_prefix>` and look for the `amp-collector` and `kong` log streams.
 
-Azure:
-
-```bash
-cd terraform/environments/azure
-cp terraform.tfvars.example terraform.tfvars
-# fill in subscription_id, location, ssh_public_key_path, and any overrides
-terraform init
-terraform apply
-```
-
-## Local Outputs
-
-After `terraform apply` in `terraform/environments/local`, Terraform writes:
-
-- `generated/hosts.yml`: local Ansible inventory
-- `generated/terraform-ansible-vars.yml`: local deployment variables
-
-It also exposes `inventory_file`, `vars_file`, and `ansible_deploy_command` via `terraform output`.
-
-## Assumptions
-
 - Docker must already be available for the `local` target.
 - AWS credentials and Azure credentials must be configured in the shell or standard provider locations.
 - The AWS target exposes ports `8000`, `8001`, and `8002` through the ALB security group.
+- The AWS target assumes IAM Identity Center / AWS SSO is available for logging into the Amazon Managed Grafana workspace.
 - The Azure target exposes ports `22`, `8000`, `8001`, and `8002` to the configured `admin_cidr`.
 - The Terraform CLI is available locally; AWS configuration formatting and validation have been run, but a real `plan` still depends on valid cloud credentials and workspace variables.
