@@ -70,12 +70,27 @@ jobs:
 
       - name: Run local stack verification
         id: local_stack_verification
+        env:
+          LOAD_AWS_TERRAFORM_OUTPUTS: "false"
+          STACK_TARGET: local
+          KONG_PROXY_URL: http://127.0.0.1:8000
+          KONG_ADMIN_URL: http://127.0.0.1:8001
+          GRAFANA_URL: http://127.0.0.1:3000
         run: |
           set -o pipefail
           python3 tests/TP_REMOTE_STACK_VERIFICATION_V001.py 2>&1 | tee ci-artifacts/observability/local-stack-verification.log
 
       - name: Run dashboard content verification
         id: dashboard_content
+        env:
+          LOAD_AWS_TERRAFORM_OUTPUTS: "false"
+          STACK_TARGET: local
+          GRAFANA_URL: http://127.0.0.1:3000
+          GRAFANA_USER: admin
+          GRAFANA_PASSWORD: admin
+          GRAFANA_DATASOURCE_NAME: Prometheus
+          EXPECTED_GRAFANA_DATASOURCE_URL: http://prometheus:9090
+          EXPECT_PROVISIONED_DASHBOARD: "true"
         run: |
           set -o pipefail
           python3 tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py 2>&1 | tee ci-artifacts/observability/dashboard-content.log
