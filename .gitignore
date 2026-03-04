@@ -4,4 +4,3 @@
 anisible/.secrets/
 deployment/kong/kong.env
 promethusGrafana/grafana.env
-/.local-runtime
