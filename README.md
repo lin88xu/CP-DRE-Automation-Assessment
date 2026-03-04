@@ -391,6 +391,41 @@ Operator investigation path:
 3. Query Kong `/status` and `/metrics`.
 4. Inspect runtime logs from Docker Compose or `kubectl logs` if the Minikube runtime is in use.
 
+## SLIs / SLOs
+
+For assessment purposes, the repository treats SLIs and SLOs as an operational layer built on top of the Prometheus and Grafana signals already described above.
+
+Candidate SLIs for this service:
+
+- Availability:
+  percentage of successful proxy requests over total proxy requests, derived from `kong_http_requests_total`
+- Latency:
+  proxy and upstream latency derived from `kong_kong_latency_ms`, `kong_upstream_latency_ms`, and `kong_request_latency_ms`
+- Error rate:
+  proportion of `5xx` responses returned through Kong
+- Telemetry health:
+  whether Prometheus can scrape the `kong-admin` target consistently
+
+Illustrative SLOs for a small internal API gateway:
+
+- Availability SLO:
+  `99.5%` of proxy requests return non-`5xx` responses over a rolling 30-day window
+- Latency SLO:
+  `95%` of requests complete within `500ms` total request latency over a rolling 30-day window
+- Telemetry SLO:
+  Prometheus target health for `kong-admin` remains `up` for `99%` of scrape intervals
+
+How they fit this repository:
+
+- The local stack verification script gives a fast binary signal that the service and observability stack are up after deployment.
+- The dashboard-content test proves that operators have access to the expected metrics and dashboard structure.
+- The HPA load test shows that runtime behavior changes can be observed under pressure rather than inferred from static config.
+- In a fuller production rollout, these SLIs would be turned into recording rules, alert thresholds, and error-budget style release decisions.
+
+Tradeoff:
+
+- This repository demonstrates the signals and the thinking, but it does not yet enforce release gates directly from SLO burn-rate alerts.
+
 ## Resiliency Design
 
 The design focuses on simple, observable failure handling rather than high-availability clustering.
