@@ -34,6 +34,11 @@ variable "kong_image" {
   description = "Kong container image."
 }
 
+variable "postgres_image" {
+  type        = string
+  description = "PostgreSQL container image used for the task-local Kong database."
+}
+
 variable "proxy_port" {
   type        = number
   description = "Public port mapped to the Kong proxy."

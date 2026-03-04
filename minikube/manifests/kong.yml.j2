@@ -35,7 +35,20 @@ spec:
               name: manager
           env:
             - name: KONG_DATABASE
-              value: "off"
+              value: postgres
+            - name: KONG_PG_HOST
+              value: {{ kong_postgres_service_name }}
+            - name: KONG_PG_PORT
+              value: "{{ kong_db_port }}"
+            - name: KONG_PG_USER
+              value: "{{ kong_postgres_user }}"
+            - name: KONG_PG_DATABASE
+              value: "{{ kong_postgres_database }}"
+            - name: KONG_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kong-db-auth
+                  key: postgres-password
             - name: KONG_PROXY_ACCESS_LOG
               value: /dev/stdout
             - name: KONG_PROXY_ERROR_LOG
@@ -72,10 +85,6 @@ spec:
               value: "1"
             - name: KONG_PREFIX
               value: /usr/local/kong
-            - name: KONG_DECLARATIVE_CONFIG
-              value: /etc/kong/declarative/kong.yml
-            - name: KONG_DECLARATIVE_CONFIG_ENCODED
-              value: "false"
           readinessProbe:
             tcpSocket:
               port: admin
@@ -93,14 +102,6 @@ spec:
             limits:
               cpu: {{ minikube_kong_cpu_limit }}
               memory: {{ minikube_kong_memory_limit }}
-          volumeMounts:
-            - name: kong-config
-              mountPath: /etc/kong/declarative
-              readOnly: true
-      volumes:
-        - name: kong-config
-          configMap:
-            name: kong-config
 ---
 apiVersion: v1
 kind: Service

@@ -70,6 +70,7 @@ jobs:
       - name: Deploy local Minikube runtime
         id: deploy_local_runtime
         env:
+          ANSIBLE_SECRET_CACHE_DIR: ${{ runner.temp }}/ansible-secrets
           MINIKUBE_CPUS: "2"
           MINIKUBE_MEMORY_MB: "4096"
           MINIKUBE_HTTPBIN_ROLLOUT_TIMEOUT: "240s"
@@ -125,6 +126,8 @@ jobs:
       - name: Tear down local Minikube runtime
         if: always()
         id: teardown_local_runtime
+        env:
+          ANSIBLE_SECRET_CACHE_DIR: ${{ runner.temp }}/ansible-secrets
         run: |
           set -o pipefail
           bash ./local-runtime.sh down --no-ask-become-pass 2>&1 | tee ci-artifacts/minikube-hpa/local-runtime-down.log

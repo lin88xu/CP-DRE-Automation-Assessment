@@ -89,7 +89,7 @@ Prometheus -> Grafana
 - Kong Manager auth and session secrets are generated per deployment instead of using static literals.
 - Docker Compose binds the Kong Admin API, Kong Manager UI, Prometheus, and Grafana to `127.0.0.1` by default.
 - The Minikube stack keeps Prometheus, Grafana, and Kong management services internal to the cluster; only the proxy remains on a NodePort by default.
-- AWS stores Kong Manager secrets in AWS Secrets Manager for ECS injection.
+- AWS stores Kong Manager and Postgres secrets in AWS Secrets Manager for ECS injection.
 - AWS and Azure no longer publish the Kong Admin API or Kong Manager publicly unless `publish_admin_api` and `publish_manager_ui` are explicitly enabled.
 - Generated cloud secrets still live in Terraform state, so cloud deployments should use an encrypted remote backend and tightly scoped state access.
 
@@ -134,25 +134,28 @@ Recommended local automation flow:
 The current active local runtime is the Minikube-backed path behind
 `./local-runtime.sh`. In that path:
 
-- Kong is DB-less
+- Kong stores configuration in PostgreSQL on a PersistentVolumeClaim
 - Prometheus stores its TSDB on a PersistentVolumeClaim
 - Grafana stores its SQLite state on a PersistentVolumeClaim
 
-That means the local stack is mixed-mode:
+That means the local stack now retains state for Kong, Prometheus, and Grafana
+across pod restarts and cluster reconciliations:
 
-- Kong remains rebuild-oriented
-- Prometheus and Grafana now retain local state across pod restarts and cluster
-  reconciliations
+- Kong runtime data persists in Postgres
+- Prometheus and Grafana retain local state
 - backup and restore is available for those local Minikube PVCs when you need
   point-in-time recovery
 
 The persistent-data backup and restore automation covers:
 
-- local Minikube PVC-backed Prometheus and Grafana data
+- local Minikube PVC-backed Kong Postgres, Prometheus, and Grafana data
 - Docker-volume surfaces in this repository:
   `deployment/kong/docker-compose.yml`,
   `promethusGrafana/docker-compose.yml`,
   and `/opt/kong` on the Azure host deployment
+- the AWS ECS Postgres data path is now persisted on EFS so task replacement no
+  longer discards the Kong database, but that backup surface is managed through
+  AWS-native tooling rather than `persistent-data.sh`
 
 Use the helper script:
 
@@ -248,7 +251,7 @@ The AWS target uses a container-native deployment model:
 
 - A dedicated VPC with two public subnets across two availability zones
 - An internet-facing Application Load Balancer exposing Kong proxy, Admin API, and Manager ports
-- An ECS cluster running Kong on Fargate in DB-less mode
+- An ECS cluster running Kong on Fargate with a PostgreSQL container whose data is persisted on EFS, plus a Kong bootstrap sidecar
 - CloudWatch Logs for container log collection
 - ECS service autoscaling driven by CPU utilization, memory utilization, and ALB request count on the proxy target group
 
@@ -486,7 +489,7 @@ Validated locally in this workspace:
 - The local Ansible playbooks now target a single Minikube-backed local runtime
 - Automated rollback execution is implemented in `./local-runtime.sh` for verified local deployments
 - Automated local failure detection and guarded recovery is implemented in `./auto-remediation.py`
-- Persistent-data backup and restore automation is implemented in `./persistent-data.sh`, including local Minikube PVCs for Prometheus and Grafana
+- Persistent-data backup and restore automation is implemented in `./persistent-data.sh`, including local Minikube PVCs for Kong Postgres, Prometheus, and Grafana
 
 Known limitation from local validation:
 
@@ -498,7 +501,7 @@ Tradeoffs:
 
 - AWS uses ECS/Fargate to avoid host management while Azure remains single-host for now.
 - Docker Compose is still used for the Azure host-based path for consistency and speed.
-- Kong runs in DB-less mode for simplicity and reproducibility, rather than full database-backed dynamic configuration.
+- Kong now runs against PostgreSQL across the local, AWS, and Azure/containerized paths; the AWS target keeps its containerized Postgres data on EFS rather than using a managed database service.
 - Observability focuses on metrics and logs first, without a full tracing stack.
 
 Assumptions:

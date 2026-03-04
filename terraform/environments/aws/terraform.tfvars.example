@@ -18,7 +18,8 @@ enable_managed_observability = true
 observability_kong_job_name  = "kong-admin"
 observability_scrape_interval = "10s"
 
-# Kong runs on ECS/Fargate behind an ALB in the AWS target.
+# Kong runs on ECS/Fargate behind an ALB in the AWS target, with PostgreSQL
+# data persisted on EFS.
 # Managed observability adds an AMP workspace, an AMG workspace, and a Prometheus sidecar
 # in the ECS task that scrapes Kong and remote-writes metrics to AMP.
 # Keep admin_cidr narrow and only flip publish_admin_api / publish_manager_ui to true

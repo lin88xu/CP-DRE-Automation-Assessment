@@ -10,6 +10,7 @@ module "kong" {
   subnet_cidr                                 = var.subnet_cidr
   secondary_subnet_cidr                       = var.secondary_subnet_cidr
   kong_image                                  = var.kong_image
+  postgres_image                              = var.postgres_image
   proxy_port                                  = var.proxy_port
   admin_port                                  = var.admin_port
   manager_port                                = var.manager_port

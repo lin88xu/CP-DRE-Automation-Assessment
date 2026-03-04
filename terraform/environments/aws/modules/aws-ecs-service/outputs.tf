@@ -28,6 +28,16 @@ output "ecs_service_name" {
   description = "ECS service name."
 }
 
+output "postgres_efs_file_system_id" {
+  value       = aws_efs_file_system.kong_postgres.id
+  description = "EFS file system ID used for PostgreSQL data persistence."
+}
+
+output "postgres_efs_access_point_id" {
+  value       = aws_efs_access_point.kong_postgres.id
+  description = "EFS access point ID used by the ECS task for PostgreSQL data."
+}
+
 output "amp_workspace_id" {
   value       = var.enable_managed_observability ? aws_prometheus_workspace.this[0].id : null
   description = "Amazon Managed Service for Prometheus workspace ID."

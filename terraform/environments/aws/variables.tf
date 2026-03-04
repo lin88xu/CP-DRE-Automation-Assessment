@@ -46,6 +46,12 @@ variable "kong_image" {
   default     = "kong:latest"
 }
 
+variable "postgres_image" {
+  type        = string
+  description = "PostgreSQL container image used for the task-local Kong database."
+  default     = "postgres:15-alpine"
+}
+
 variable "proxy_port" {
   type        = number
   description = "Public port mapped to the Kong proxy."

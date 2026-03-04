@@ -6,12 +6,13 @@ runtime path.
 What it deploys:
 
 - a `httpbin` upstream deployment and service
-- a DB-less Kong deployment backed by a ConfigMap
+- a PostgreSQL deployment and PVC for Kong state
+- a Kong deployment backed by PostgreSQL, plus a bootstrap job that imports the repo-managed config into the database
 - a cluster-internal Kong service plus a dedicated NodePort service for the Kong proxy only
 - a Prometheus deployment and cluster-internal service that scrapes Kong metrics
 - a Grafana deployment and cluster-internal service preloaded with the official Kong dashboard
 - a HorizontalPodAutoscaler for Kong based on CPU and memory utilization
-- PersistentVolumeClaims for Prometheus and Grafana so observability data survives pod recreation
+- PersistentVolumeClaims for Kong Postgres, Prometheus, and Grafana so state survives pod recreation
 
 The Ansible Minikube role installs Minikube and `kubectl`, starts a local
 cluster with the Docker driver, enables the `metrics-server` and `ingress`

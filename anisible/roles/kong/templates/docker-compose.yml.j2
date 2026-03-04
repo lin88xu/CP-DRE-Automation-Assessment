@@ -4,27 +4,63 @@ services:
   kong-db:
     image: {{ kong_postgres_image }}
     container_name: {{ kong_name_prefix }}-db
+    env_file:
+      - ./kong.env
     environment:
-      POSTGRES_DB: kong
-      POSTGRES_USER: kong
-      POSTGRES_PASSWORD: kong
+      POSTGRES_DB: {{ kong_postgres_database }}
+      POSTGRES_USER: {{ kong_postgres_user }}
     volumes:
       - kong-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "kong"]
+      test: ["CMD", "pg_isready", "-U", "{{ kong_postgres_user }}", "-d", "{{ kong_postgres_database }}"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  kong-bootstrap:
+    image: {{ kong_image }}
+    container_name: {{ kong_name_prefix }}-bootstrap
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    env_file:
+      - ./kong.env
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: {{ kong_postgres_service_name }}
+      KONG_PG_PORT: "{{ kong_db_port }}"
+      KONG_PG_USER: {{ kong_postgres_user }}
+      KONG_PG_DATABASE: {{ kong_postgres_database }}
+      KONG_LOG_LEVEL: info
+    volumes:
+      - ./docker-kong.yml:/etc/kong/docker-kong.yml:ro
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if ! kong migrations bootstrap; then
+          kong migrations up -y || true
+          kong migrations finish -y || true
+        fi
+        kong config db_import /etc/kong/docker-kong.yml
 
   kong:
     image: {{ kong_image }}
     container_name: {{ kong_name_prefix }}
     depends_on:
-      - kong-db
+      kong-db:
+        condition: service_healthy
+      kong-bootstrap:
+        condition: service_completed_successfully
     env_file:
       - ./kong.env
     environment:
-      KONG_DATABASE: "off"
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: {{ kong_postgres_service_name }}
+      KONG_PG_PORT: "{{ kong_db_port }}"
+      KONG_PG_USER: {{ kong_postgres_user }}
+      KONG_PG_DATABASE: {{ kong_postgres_database }}
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PROXY_LISTEN: 0.0.0.0:8000
@@ -37,8 +73,6 @@ services:
       KONG_ENFORCE_RBAC: "off"
       KONG_LOG_LEVEL: info
       KONG_PREFIX: /usr/local/kong
-      KONG_DECLARATIVE_CONFIG: /etc/kong/docker-kong.yml
-      KONG_DECLARATIVE_CONFIG_ENCODED: "false"
     ports:
       - "{{ kong_proxy_bind_host }}:{{ kong_proxy_port }}:8000"
       - "{{ kong_admin_bind_host }}:{{ kong_admin_port }}:8001"

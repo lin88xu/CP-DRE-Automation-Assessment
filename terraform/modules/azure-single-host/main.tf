@@ -15,6 +15,11 @@ resource "random_password" "kong_admin_gui_session_secret" {
   special = false
 }
 
+resource "random_password" "postgres_password" {
+  length  = 32
+  special = false
+}
+
 resource "azurerm_resource_group" "this" {
   name     = var.resource_group_name
   location = var.location
@@ -150,6 +155,7 @@ resource "azurerm_linux_virtual_machine" "this" {
       manager_bind_host   = var.publish_manager_ui ? "0.0.0.0" : "127.0.0.1"
     })
     kong_env = templatefile("${path.module}/../../templates/kong.env.tftpl", {
+      postgres_password      = random_password.postgres_password.result
       admin_gui_auth_conf    = jsonencode({ secret = random_password.kong_admin_gui_auth_secret.result })
       admin_gui_session_conf = jsonencode({ secret = random_password.kong_admin_gui_session_secret.result })
     })
