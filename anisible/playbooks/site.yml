@@ -9,20 +9,13 @@
         | default(playbook_dir ~ '/../.secrets', true)
       }}
     ansible_secret_cache_dir: "{{ ansible_secret_cache_root }}/{{ inventory_hostname }}"
+    ansible_secret_cache_prefix: "{{ ansible_secret_cache_root }}/{{ inventory_hostname }}-"
   tasks:
     - name: Create controller-side secret cache root
       delegate_to: localhost
       become: false
       ansible.builtin.file:
         path: "{{ ansible_secret_cache_root }}"
-        state: directory
-        mode: "0700"
-
-    - name: Create controller-side secret cache directory
-      delegate_to: localhost
-      become: false
-      ansible.builtin.file:
-        path: "{{ ansible_secret_cache_dir }}"
         state: directory
         mode: "0700"
 
@@ -40,7 +33,7 @@
             | default(
                 observability_grafana_admin_password
                 | default(
-                    lookup('password', ansible_secret_cache_dir + '/grafana_admin_password length=32 chars=ascii_letters,digits'),
+                    lookup('password', ansible_secret_cache_prefix + 'grafana_admin_password length=32 chars=ascii_letters,digits'),
                     true
                   ),
                 true
@@ -52,7 +45,7 @@
             | default(
                 kong_admin_gui_auth_secret
                 | default(
-                    lookup('password', ansible_secret_cache_dir + '/kong_admin_gui_auth_secret length=64 chars=ascii_letters,digits'),
+                    lookup('password', ansible_secret_cache_prefix + 'kong_admin_gui_auth_secret length=64 chars=ascii_letters,digits'),
                     true
                   ),
                 true
@@ -64,7 +57,7 @@
             | default(
                 kong_admin_gui_session_secret
                 | default(
-                    lookup('password', ansible_secret_cache_dir + '/kong_admin_gui_session_secret length=64 chars=ascii_letters,digits'),
+                    lookup('password', ansible_secret_cache_prefix + 'kong_admin_gui_session_secret length=64 chars=ascii_letters,digits'),
                     true
                   ),
                 true
@@ -76,7 +69,7 @@
             | default(
                 kong_postgres_password
                 | default(
-                    lookup('password', ansible_secret_cache_dir + '/kong_postgres_password length=32 chars=ascii_letters,digits'),
+                    lookup('password', ansible_secret_cache_prefix + 'kong_postgres_password length=32 chars=ascii_letters,digits'),
                     true
                   ),
                 true

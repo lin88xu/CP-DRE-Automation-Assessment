@@ -15,6 +15,7 @@ spec:
       containers:
         - name: bootstrap
           image: {{ kong_image }}
+          imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -ec

@@ -14,7 +14,7 @@ kong_postgres_service_name: kong-db
 kong_postgres_database: kong
 kong_postgres_user: kong
 kong_postgres_password: ""
-kong_image: "kong:latest"
+kong_image: "kong:3.9.1"
 kong_postgres_image: "postgres:15-alpine"
 kong_app_host_header: example.com
 kong_upstream_url: http://httpbin.org

@@ -16,7 +16,7 @@ kong_postgres_service_name: kong-db
 kong_postgres_database: kong
 kong_postgres_user: kong
 kong_postgres_password: ""
-kong_image: "kong:latest"
+kong_image: "kong:3.9.1"
 kong_postgres_image: "postgres:15-alpine"
 kong_app_host_header: example.com
 kong_upstream_url: http://httpbin.org
@@ -62,7 +62,7 @@ minikube_kong_max_replicas: 5
 minikube_httpbin_rollout_timeout: "{{ lookup('env', 'MINIKUBE_HTTPBIN_ROLLOUT_TIMEOUT') | default('180s', true) }}"
 minikube_kong_rollout_timeout: "{{ lookup('env', 'MINIKUBE_KONG_ROLLOUT_TIMEOUT') | default('240s', true) }}"
 minikube_postgres_rollout_timeout: "{{ lookup('env', 'MINIKUBE_POSTGRES_ROLLOUT_TIMEOUT') | default('180s', true) }}"
-minikube_kong_bootstrap_timeout: "{{ lookup('env', 'MINIKUBE_KONG_BOOTSTRAP_TIMEOUT') | default('240s', true) }}"
+minikube_kong_bootstrap_timeout: "{{ lookup('env', 'MINIKUBE_KONG_BOOTSTRAP_TIMEOUT') | default('600s', true) }}"
 minikube_prometheus_rollout_timeout: "{{ lookup('env', 'MINIKUBE_PROMETHEUS_ROLLOUT_TIMEOUT') | default('180s', true) }}"
 minikube_grafana_rollout_timeout: "{{ lookup('env', 'MINIKUBE_GRAFANA_ROLLOUT_TIMEOUT') | default('180s', true) }}"
 minikube_kong_cpu_request: 250m

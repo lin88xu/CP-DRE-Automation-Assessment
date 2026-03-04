@@ -17,7 +17,9 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - kong-network
+      kong-network:
+        aliases:
+          - kong
 
   kong-bootstrap:
     image: kong:latest
@@ -112,3 +114,4 @@ volumes:
 networks:
   kong-network:
     driver: bridge
+    name: assessment-kong-network

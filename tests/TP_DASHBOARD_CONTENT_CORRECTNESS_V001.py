@@ -4,7 +4,7 @@ import base64
 import json
 import os
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 from urllib.parse import quote
 
 from TP_LOCAL_STACK_VERIFICATION_V001 import (
@@ -14,8 +14,11 @@ from TP_LOCAL_STACK_VERIFICATION_V001 import (
     http_get,
 )
 
-GRAFANA_USER = os.getenv("GRAFANA_USER", "admin")
-GRAFANA_PASSWORD = os.getenv("GRAFANA_PASSWORD", "admin")
+
+def env_with_fallback(primary: str, fallback: str, default: str) -> str:
+    return os.getenv(primary) or os.getenv(fallback) or default
+
+
 GRAFANA_DATASOURCE_UID = os.getenv("GRAFANA_DATASOURCE_UID", "prometheus")
 GRAFANA_DASHBOARD_UID = os.getenv("GRAFANA_DASHBOARD_UID", "mY9p7dQmz")
 GRAFANA_DASHBOARD_TITLE = os.getenv("GRAFANA_DASHBOARD_TITLE", "Kong (official)")
@@ -44,6 +47,27 @@ EXPECTED_PROMETHEUS_EXPRESSIONS = [
 ]
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_DASHBOARD_PATH = REPO_ROOT / "terraform/environments/aws/templates/kong-official.json"
+ANSIBLE_SECRET_DIR = REPO_ROOT / "anisible" / ".secrets"
+
+
+def read_secret_file(key: str) -> Optional[str]:
+    candidates = [
+        ANSIBLE_SECRET_DIR / f"localhost-{key}",
+        ANSIBLE_SECRET_DIR / "localhost" / key,
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    return None
+
+
+GRAFANA_USER = env_with_fallback("GRAFANA_USER", "GRAFANA_ADMIN_USER", "grafana-admin")
+GRAFANA_PASSWORD = (
+    os.getenv("GRAFANA_PASSWORD")
+    or os.getenv("GRAFANA_ADMIN_PASSWORD")
+    or read_secret_file("grafana_admin_password")
+    or "admin"
+)
 
 
 def grafana_headers() -> Dict[str, str]:

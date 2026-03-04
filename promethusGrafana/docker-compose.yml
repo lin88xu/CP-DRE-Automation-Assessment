@@ -11,8 +11,9 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - kong-observability
     restart: unless-stopped
 
   grafana:
@@ -28,6 +29,9 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ../kong/kong/plugins/prometheus/grafana:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
+    networks:
+      - default
+      - kong-observability
     depends_on:
       - prometheus
     restart: unless-stopped
@@ -35,3 +39,8 @@ services:
 volumes:
   prometheus-data:
   grafana-data:
+
+networks:
+  kong-observability:
+    external: true
+    name: assessment-kong-network

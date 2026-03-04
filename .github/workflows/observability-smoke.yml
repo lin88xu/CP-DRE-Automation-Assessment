@@ -219,15 +219,6 @@ jobs:
           path: ci-artifacts/observability
           if-no-files-found: error
 
-      - name: Stop Kong stack
-        if: always()
-        run: |
-          docker compose \
-            --env-file deployment/kong/kong.env.example \
-            --project-directory deployment/kong \
-            -f deployment/kong/docker-compose.yml \
-            down -v
-
       - name: Stop observability stack
         if: always()
         run: |
@@ -235,4 +226,13 @@ jobs:
             --env-file promethusGrafana/grafana.env.example \
             --project-directory promethusGrafana \
             -f promethusGrafana/docker-compose.yml \
+            down -v
+
+      - name: Stop Kong stack
+        if: always()
+        run: |
+          docker compose \
+            --env-file deployment/kong/kong.env.example \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
             down -v

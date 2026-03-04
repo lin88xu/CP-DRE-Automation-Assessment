@@ -12,7 +12,7 @@ What it deploys:
 - a Prometheus deployment and cluster-internal service that scrapes Kong metrics
 - a Grafana deployment and cluster-internal service preloaded with the official Kong dashboard
 - a HorizontalPodAutoscaler for Kong based on CPU and memory utilization
-- PersistentVolumeClaims for Kong Postgres, Prometheus, and Grafana so state survives pod recreation
+- PersistentVolumeClaim for Kong Postgres, Prometheus, and Grafana so state survives pod recreation
 
 The Ansible Minikube role installs Minikube and `kubectl`, starts a local
 cluster with the Docker driver, enables the `metrics-server` and `ingress`

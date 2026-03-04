@@ -15,7 +15,7 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets:
-          - host.docker.internal:8001
+          - kong:8001
         labels:
           environment: local
           scrape_target: kong
