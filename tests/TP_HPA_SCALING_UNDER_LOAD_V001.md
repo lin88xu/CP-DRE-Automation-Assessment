@@ -9,6 +9,7 @@
 - Purpose: verify that the Kong HorizontalPodAutoscaler scales the local deployment above its baseline replica count under sustained proxy load.
 - Scope: local Minikube runtime only, focused on HPA scale-up behavior for the Kong deployment.
 - Basis: the local runtime deploys a Kubernetes `HorizontalPodAutoscaler` for Kong backed by the Minikube `metrics-server` addon.
+- Assessment relevance: this is the clearest local demonstration that the system reacts to runtime pressure instead of remaining a static deployment.
 
 ## 3. Test Items
 
@@ -38,6 +39,7 @@
 - The script captures the baseline HPA state and starts concurrent in-cluster proxy traffic from the Prometheus pod.
 - The script polls the Kong HPA and deployment status until scale-up is observed or the timeout is reached.
 - Pass when the HPA or deployment replica count increases above baseline within the configured timeout.
+- Run this after the basic verification and dashboard-content checks to show progressive evidence: healthy deployment, meaningful observability, then observable scaling behavior.
 
 ## 7. Item Pass/Fail Criteria
 

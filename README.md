@@ -1,12 +1,12 @@
 # CP DRE Automation Assessment
 
-This repository packages Kong Gateway as the application under assessment and wraps it with infrastructure automation, configuration management, CI/CD, and observability.
+This repository packages Kong Gateway as the application under assessment and wraps it with infrastructure automation, configuration management, CI/CD, observability, and recovery controls.
 
-The same deployment model is intended to work across:
+The repository supports multiple targets, but they serve different purposes in the assessment narrative:
 
-- Local
-- AWS
-- Azure
+- `local` is the zero-cost, fully runnable demonstration path for the assessment requirements.
+- `aws` is the production-minded extension that shows how the same service can be operated with managed cloud services, rollback controls, backup, and managed observability.
+- `azure` is an additional single-host target that reuses the same packaging patterns.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ python3 --version
 
 ## Architecture Overview
 
-The solution is organized as a layered delivery model:
+The solution is organized as a layered delivery model. For interview and assessment purposes, the local path is the fastest end-to-end demo, while the AWS path is the clearest example of how the design scales into a more production-like environment.
 
 1. Terraform provisions the target environment.
 2. Ansible configures the target host and deploys the application and observability stack.
@@ -237,6 +237,19 @@ This repository contains the required deliverables from the assessment brief:
 - Recovery runbook:
   [docs/RECOVERY_RUNBOOK.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/docs/RECOVERY_RUNBOOK.md)
 
+## Assessment Positioning
+
+The cleanest way to present this repository against the assessment brief is:
+
+- Demonstrate the `local` target live.
+  It is the no-cost path, uses Terraform plus Ansible, and can be validated end to end from the repository alone.
+- Explain the `aws` target as the production-minded extension.
+  It shows how the same service would be run with ECS/Fargate, CloudWatch, EFS-backed persistence, Secrets Manager, and managed observability.
+- Use the local verification scripts as concrete proof points.
+  `TP_LOCAL_STACK_VERIFICATION_V001`, `TP_DASHBOARD_CONTENT_CORRECTNESS_V001`, and `TP_HPA_SCALING_UNDER_LOAD_V001` collectively demonstrate service health, observability correctness, and behavior under load.
+
+This framing keeps the branch aligned with the brief's low-cost expectation while still showing broader operational thinking.
+
 ## Infrastructure As Code
 
 Terraform supports three targets:
@@ -282,7 +295,7 @@ Scope note:
 
 - Ansible is the deployment layer for the local and Azure host-based paths.
 - The local path uses Terraform to generate the Ansible inventory and variables handoff before Ansible deploys the Minikube-backed local stack.
-- The AWS target is container-native and packages Kong directly into ECS/Fargate with Terraform.
+- The AWS target is container-native and packages Kong directly into ECS/Fargate with Terraform, which is the equivalent configuration-management mechanism for that target.
 
 Key files:
 
@@ -295,7 +308,7 @@ Key files:
 
 ## CI/CD And GitOps Flow
 
-The current GitHub Actions workflows on this branch cover validation and local smoke testing:
+The current GitHub Actions workflows on this branch cover validation and local smoke testing, with the local path acting as the branch's executable proof that changes can move through Git, CI, and a real environment safely:
 
 - Terraform validation:
   [.github/workflows/terraform-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/terraform-ci.yml)
@@ -365,11 +378,11 @@ Relevant files:
 Verification assets:
 
 - `python3 tests/TP_LOCAL_STACK_VERIFICATION_V001.py`
-  Validates Kong Admin, Kong Proxy, Prometheus, and Grafana health on the local stack.
+  Fast post-deployment proof that the local stack is reachable and operational.
 - `python3 tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py`
-  Validates the provisioned Grafana Prometheus datasource and the live `Kong (official)` dashboard content.
+  Proves that observability is configured meaningfully, not just that Grafana is up.
 - `python3 -u tests/TP_HPA_SCALING_UNDER_LOAD_V001.py`
-  Drives load through Kong and checks that the HPA scales above baseline.
+  Shows measurable runtime behavior under load rather than a static configuration claim.
 
 Operator investigation path:
 
@@ -493,7 +506,7 @@ Validated locally in this workspace:
 
 Known limitation from local validation:
 
-- Live AWS and Azure plans still require real cloud credentials and environment-specific inputs outside this repository.
+- Live AWS and Azure plans still require real cloud credentials and environment-specific inputs outside this repository, so the branch's strongest directly runnable evidence remains the local path.
 
 ## Tradeoffs And Assumptions
 
@@ -503,6 +516,7 @@ Tradeoffs:
 - Docker Compose is still used for the Azure host-based path for consistency and speed.
 - Kong now runs against PostgreSQL across the local, AWS, and Azure/containerized paths; the AWS target keeps its containerized Postgres data on EFS rather than using a managed database service.
 - Observability focuses on metrics and logs first, without a full tracing stack.
+- The local path is intentionally the primary demo target because it satisfies the no-cost expectation better than the cloud targets.
 
 Assumptions:
 

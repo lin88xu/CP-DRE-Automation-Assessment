@@ -9,6 +9,7 @@
 - Purpose: verify that Grafana exposes the expected provisioned Kong dashboard content, not just Grafana service health.
 - Scope: Grafana datasource configuration, dashboard provisioning metadata, dashboard variables, panel layout, and key Prometheus expressions used by the provisioned Kong dashboard.
 - Basis: the local stack provisions the official Kong Grafana dashboard and a Prometheus datasource into Grafana.
+- Assessment relevance: this test demonstrates that observability is meaningful and pre-wired for operators, not limited to basic container-up checks.
 
 ## 3. Test Items
 
@@ -38,6 +39,7 @@
 - Use Grafana's authenticated HTTP API to inspect the live datasource and dashboard objects.
 - Compare the live dashboard against key invariants from the provisioned dashboard definition.
 - Fail if required dashboard content, variables, datasource bindings, or Prometheus expressions are missing.
+- Run this after local stack verification to show that the repository validates observability quality as part of the delivery story.
 
 ## 7. Item Pass/Fail Criteria
 
