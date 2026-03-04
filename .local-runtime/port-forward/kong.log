@@ -4,8 +4,8 @@ Forwarding from 127.0.0.1:8001 -> 8001
 Forwarding from [::1]:8001 -> 8001
 Forwarding from 127.0.0.1:8002 -> 8002
 Forwarding from [::1]:8002 -> 8002
-Handling connection for 8000
 Handling connection for 8001
+Handling connection for 8000
 Handling connection for 8001
 Handling connection for 8000
 Handling connection for 8000
