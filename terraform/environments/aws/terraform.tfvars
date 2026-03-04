@@ -39,3 +39,4 @@ grafana_prometheus_datasource_name          = "Amazon Managed Service for Promet
 # Leave publish_admin_api and publish_manager_ui disabled unless you explicitly
 # need direct public management access, and keep desired_count/min_capacity/
 # max_capacity at 1 for this task-local PostgreSQL design.
+upstream_url                  = "http://127.0.0.1:9"
