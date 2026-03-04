@@ -30,6 +30,11 @@ minikube_cpus: "{{ lookup('env', 'MINIKUBE_CPUS') | default('4', true) | int }}"
 minikube_memory_mb: "{{ lookup('env', 'MINIKUBE_MEMORY_MB') | default('8192', true) | int }}"
 minikube_namespace: kong
 minikube_public_host: "{{ kong_public_host }}"
+minikube_storage_class_name: ""
+minikube_prometheus_pvc_name: prometheus-storage
+minikube_prometheus_storage_size: 8Gi
+minikube_grafana_pvc_name: grafana-storage
+minikube_grafana_storage_size: 4Gi
 minikube_kong_proxy_nodeport: 30080
 minikube_kong_admin_nodeport: 30081
 minikube_kong_manager_nodeport: 30082

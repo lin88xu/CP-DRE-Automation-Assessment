@@ -1,3 +1,18 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ minikube_prometheus_pvc_name }}
+  namespace: {{ minikube_namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ minikube_prometheus_storage_size }}
+{% if minikube_storage_class_name %}
+  storageClassName: {{ minikube_storage_class_name }}
+{% endif %}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,6 +20,8 @@ metadata:
   namespace: {{ minikube_namespace }}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: prometheus
@@ -47,7 +64,8 @@ spec:
               - key: kong-recording-rules.yml
                 path: rules/kong-recording-rules.yml
         - name: prometheus-storage
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: {{ minikube_prometheus_pvc_name }}
 ---
 apiVersion: v1
 kind: Service

@@ -52,3 +52,8 @@ output "grafana_workspace_arn" {
   value       = module.kong.grafana_workspace_arn
   description = "Amazon Managed Grafana workspace ARN."
 }
+
+output "disaster_recovery_rebuild_command" {
+  value       = "bash ../../disaster-recovery.sh aws rebuild -- -var-file=terraform.tfvars"
+  description = "Repository-native command to destroy and rebuild the AWS platform during a major outage."
+}

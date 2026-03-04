@@ -23,3 +23,7 @@ output "ssh_command" {
   description = "SSH command for the VM."
 }
 
+output "disaster_recovery_rebuild_command" {
+  value       = "bash ../../disaster-recovery.sh azure rebuild -- -var-file=terraform.tfvars"
+  description = "Repository-native command to destroy and rebuild the Azure platform during a major outage."
+}
