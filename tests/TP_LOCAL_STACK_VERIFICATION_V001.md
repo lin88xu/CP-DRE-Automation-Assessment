@@ -9,6 +9,7 @@
 - Purpose: verify that the deployed local stack is reachable and operational after deployment.
 - Scope: Kong proxy and admin endpoints, Prometheus health/target visibility, and Grafana health.
 - Basis: local Minikube-backed deployment exposed through the localhost port-forwards managed by `./local-runtime.sh`.
+- Assessment relevance: this is the fastest executable proof that the no-cost local environment actually deployed and that the core service and observability endpoints are live.
 
 ## 3. Test Items
 
@@ -38,6 +39,7 @@
 - Use localhost endpoints only.
 - Apply bounded retries to tolerate transient port-forward resets during startup.
 - Treat any non-`200` response or missing dependency target as a failed verification.
+- Use this test first in a demo because it establishes a working baseline before deeper observability or scaling checks.
 
 ## 7. Item Pass/Fail Criteria
 
