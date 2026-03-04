@@ -97,13 +97,13 @@ variable "observability_grafana_image" {
 variable "observability_grafana_admin_user" {
   type        = string
   description = "Grafana admin username."
-  default     = "admin"
+  default     = ""
 }
 
 variable "observability_grafana_admin_password" {
   type        = string
   description = "Grafana admin password."
-  default     = "admin"
+  default     = ""
 }
 
 variable "observability_scrape_host" {

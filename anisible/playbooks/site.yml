@@ -3,7 +3,61 @@
   become: true
   vars:
     effective_deployment_runtime: "{{ 'local' if ansible_connection == 'local' and deployment_runtime == 'docker_compose' else deployment_runtime }}"
+    ansible_secret_cache_dir: "{{ playbook_dir }}/../.secrets/{{ inventory_hostname }}"
   tasks:
+    - name: Create controller-side secret cache directory
+      delegate_to: localhost
+      become: false
+      ansible.builtin.file:
+        path: "{{ ansible_secret_cache_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Resolve generated management secrets
+      no_log: true
+      ansible.builtin.set_fact:
+        observability_grafana_admin_user: >-
+          {{
+            lookup('env', 'GRAFANA_ADMIN_USER')
+            | default(observability_grafana_admin_user | default('grafana-admin', true), true)
+          }}
+        observability_grafana_admin_password: >-
+          {{
+            lookup('env', 'GRAFANA_ADMIN_PASSWORD')
+            | default(
+                observability_grafana_admin_password
+                | default(
+                    lookup('password', ansible_secret_cache_dir + '/grafana_admin_password length=32 chars=ascii_letters,digits'),
+                    true
+                  ),
+                true
+              )
+          }}
+        kong_admin_gui_auth_secret: >-
+          {{
+            lookup('env', 'KONG_ADMIN_GUI_AUTH_SECRET')
+            | default(
+                kong_admin_gui_auth_secret
+                | default(
+                    lookup('password', ansible_secret_cache_dir + '/kong_admin_gui_auth_secret length=64 chars=ascii_letters,digits'),
+                    true
+                  ),
+                true
+              )
+          }}
+        kong_admin_gui_session_secret: >-
+          {{
+            lookup('env', 'KONG_ADMIN_GUI_SESSION_SECRET')
+            | default(
+                kong_admin_gui_session_secret
+                | default(
+                    lookup('password', ansible_secret_cache_dir + '/kong_admin_gui_session_secret length=64 chars=ascii_letters,digits'),
+                    true
+                  ),
+                true
+              )
+          }}
+
     - name: Ensure Docker is available for local runtime
       ansible.builtin.import_role:
         name: docker
@@ -71,13 +125,13 @@
           - >-
             proxy_url=http://{{ local_runtime_public_host }}:{{ minikube_kong_proxy_nodeport }}
           - >-
-            admin_url=http://{{ local_runtime_public_host }}:{{ minikube_kong_admin_nodeport }}
+            admin_url=kubectl -n {{ minikube_namespace }} port-forward svc/kong {{ kong_admin_port }}:8001
           - >-
-            manager_url=http://{{ local_runtime_public_host }}:{{ minikube_kong_manager_nodeport }}
+            manager_url=kubectl -n {{ minikube_namespace }} port-forward svc/kong {{ kong_manager_port }}:8002
           - >-
-            prometheus_url=http://{{ local_runtime_public_host }}:{{ minikube_prometheus_nodeport }}
+            prometheus_url=kubectl -n {{ minikube_namespace }} port-forward svc/prometheus {{ observability_prometheus_port }}:9090
           - >-
-            grafana_url=http://{{ local_runtime_public_host }}:{{ minikube_grafana_nodeport }}
+            grafana_url=kubectl -n {{ minikube_namespace }} port-forward svc/grafana {{ observability_grafana_port }}:3000
           - "grafana_login={{ observability_grafana_admin_user }}/{{ observability_grafana_admin_password }}"
       when:
         - effective_deployment_runtime in ["local", "minikube"]
@@ -89,16 +143,13 @@
           - >-
             The local runtime uses Minikube with the docker driver, so
             {{ local_runtime_browser_host }} is not directly reachable from your browser.
-          - "Use localhost tunnels instead:"
-          - "grafana_tunnel=minikube service grafana -n {{ minikube_namespace }} --url -p {{ minikube_profile }}"
-          - "prometheus_tunnel=minikube service prometheus -n {{ minikube_namespace }} --url -p {{ minikube_profile }}"
-          - "kong_tunnel=minikube service kong -n {{ minikube_namespace }} --url -p {{ minikube_profile }}"
-          - "Or use fixed localhost port-forwards:"
+          - "Use localhost port-forwards instead:"
           - "grafana_port_forward=kubectl -n {{ minikube_namespace }} port-forward svc/grafana 3000:3000"
           - "prometheus_port_forward=kubectl -n {{ minikube_namespace }} port-forward svc/prometheus 9090:9090"
           - >-
             kong_port_forward=kubectl -n {{ minikube_namespace }}
             port-forward svc/kong 8000:8000 8001:8001 8002:8002
+          - "proxy_nodeport=http://{{ local_runtime_public_host }}:{{ minikube_kong_proxy_nodeport }}"
           - "grafana_url=http://127.0.0.1:3000"
           - "prometheus_url=http://127.0.0.1:9090"
           - "proxy_url=http://127.0.0.1:8000"

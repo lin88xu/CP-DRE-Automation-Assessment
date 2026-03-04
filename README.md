@@ -45,6 +45,7 @@ The solution is organized as a layered delivery model:
 4. Prometheus scrapes Kong metrics.
 5. Grafana visualizes service health and request behavior.
 6. GitHub Actions validates Terraform, lints Ansible, smoke-tests the observability path, and exercises the Minikube HPA path under load.
+7. Management secrets are generated per deployment and management endpoints default to localhost-only or private access.
 
 High-level flow:
 
@@ -73,14 +74,24 @@ Deployment Layer
         v
 Kong Gateway
   - Proxy: 8000
-  - Admin API: 8001
-  - Manager UI: 8002
+  - Admin API: localhost/private by default
+  - Manager UI: localhost/private by default
         |
         v
 Prometheus -> Grafana
-  - Prometheus: 9090
-  - Grafana: 3000
+  - Prometheus: localhost/cluster-internal by default
+  - Grafana: localhost/cluster-internal by default
 ```
+
+## Security Hygiene
+
+- Grafana admin credentials are generated once per Ansible-driven deployment and cached under the gitignored `anisible/.secrets/` directory.
+- Kong Manager auth and session secrets are generated per deployment instead of using static literals.
+- Docker Compose binds the Kong Admin API, Kong Manager UI, Prometheus, and Grafana to `127.0.0.1` by default.
+- The Minikube stack keeps Prometheus, Grafana, and Kong management services internal to the cluster; only the proxy remains on a NodePort by default.
+- AWS stores Kong Manager secrets in AWS Secrets Manager for ECS injection.
+- AWS and Azure no longer publish the Kong Admin API or Kong Manager publicly unless `publish_admin_api` and `publish_manager_ui` are explicitly enabled.
+- Generated cloud secrets still live in Terraform state, so cloud deployments should use an encrypted remote backend and tightly scoped state access.
 
 ## Operations / Recovery
 
@@ -455,6 +466,7 @@ automatically, which map the local runtime to:
 - Kong Proxy: `http://127.0.0.1:8000`
 - Kong Admin API: `http://127.0.0.1:8001`
 - Kong Manager UI: `http://127.0.0.1:8002`
+- Grafana credentials: printed by `./local-runtime.sh up` and stored under `anisible/.secrets/localhost/`
 
 If you deploy through `./local-runtime.sh up`, those localhost
 port-forwards are started automatically and cleaned up by
@@ -503,4 +515,4 @@ Natural extensions if more time were available:
 1. Add cloud deployment workflows for Azure plans and applies.
 2. Extend automated rollback concepts beyond the local runtime into a real cloud release workflow.
 3. Add scheduled backup execution and off-host retention for Azure persistent volumes.
-4. Harden secrets handling and reduce default open access in cloud examples.
+4. Move cloud-generated Terraform secrets behind a dedicated secret store and remote state policy set.

@@ -9,13 +9,13 @@ output "proxy_url" {
 }
 
 output "admin_url" {
-  value       = "http://${aws_lb.this.dns_name}:${var.admin_port}"
-  description = "Kong Admin API URL."
+  value       = var.publish_admin_api ? "http://${aws_lb.this.dns_name}:${var.admin_port}" : null
+  description = "Kong Admin API URL when public access is enabled."
 }
 
 output "manager_url" {
-  value       = "http://${aws_lb.this.dns_name}:${var.manager_port}"
-  description = "Kong Manager URL."
+  value       = var.publish_manager_ui ? "http://${aws_lb.this.dns_name}:${var.manager_port}" : null
+  description = "Kong Manager URL when public access is enabled."
 }
 
 output "ecs_cluster_name" {

@@ -11,7 +11,7 @@ variable "availability_zone" {
 
 variable "admin_cidr" {
   type        = string
-  description = "CIDR allowed to reach the Kong load balancer ports."
+  description = "CIDR allowed to reach published management ports."
 }
 
 variable "vpc_cidr" {
@@ -47,6 +47,16 @@ variable "admin_port" {
 variable "manager_port" {
   type        = number
   description = "Public port mapped to the Kong Manager UI."
+}
+
+variable "publish_admin_api" {
+  type        = bool
+  description = "Whether to publish the Kong Admin API through the ALB."
+}
+
+variable "publish_manager_ui" {
+  type        = bool
+  description = "Whether to publish the Kong Manager UI through the ALB."
 }
 
 variable "desired_count" {

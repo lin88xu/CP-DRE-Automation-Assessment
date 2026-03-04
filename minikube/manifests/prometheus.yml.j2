@@ -73,11 +73,9 @@ metadata:
   name: prometheus
   namespace: {{ minikube_namespace }}
 spec:
-  type: NodePort
   selector:
     app: prometheus
   ports:
     - name: http
       port: 9090
       targetPort: http
-      nodePort: {{ minikube_prometheus_nodeport }}

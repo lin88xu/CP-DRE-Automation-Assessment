@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: kong
       POSTGRES_USER: kong
-      POSTGRES_PASSWORD: kong
+      POSTGRES_PASSWORD: ${KONG_PG_PASSWORD:-change-me}
     ports:
       - "5432:5432"
     volumes:
@@ -27,6 +27,8 @@ services:
     container_name: kong
     depends_on:
       - kong-db
+    env_file:
+      - ./kong.env
     environment:
       # Database Configuration - Using DB-less mode for easier local development
       KONG_DATABASE: "off"
@@ -53,8 +55,6 @@ services:
       KONG_ADMIN_GUI_URL: http://localhost:8002
       KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002
       KONG_ADMIN_GUI_AUTH: basic-auth
-      KONG_ADMIN_GUI_AUTH_CONF: '{"secret":"kong-secret"}'
-      KONG_ADMIN_GUI_SESSION_CONF: '{"secret":"kong-session-secret"}'
       KONG_ENFORCE_RBAC: "off"
 
       # Logging & Debugging
@@ -68,8 +68,8 @@ services:
       KONG_DECLARATIVE_CONFIG_ENCODED: "false"
     ports:
       - "8000:8000"  # Proxy (HTTP)
-      - "8001:8001"  # Admin API (HTTP)
-      - "8002:8002"  # Manager UI (Frontend)
+      - "127.0.0.1:8001:8001"  # Admin API (HTTP)
+      - "127.0.0.1:8002:8002"  # Manager UI (Frontend)
     volumes:
       - kong-data:/usr/local/kong
       - ./docker-kong.yml:/etc/kong/docker-kong.yml:ro

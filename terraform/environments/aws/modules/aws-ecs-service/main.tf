@@ -95,6 +95,8 @@ locals {
   ])
   grafana_bootstrap_enabled        = var.enable_managed_observability && var.enable_grafana_dashboard_bootstrap
   grafana_bootstrap_dashboard_path = "${path.module}/../../templates/kong-official.json"
+  publish_admin_api                = var.publish_admin_api
+  publish_manager_ui               = var.publish_manager_ui
   common_tags = merge(var.tags, {
     ManagedBy = "Terraform"
   })
@@ -130,12 +132,14 @@ locals {
       { name = "KONG_ADMIN_GUI_URL", value = "http://${aws_lb.this.dns_name}:${var.manager_port}" },
       { name = "KONG_ADMIN_GUI_LISTEN", value = "0.0.0.0:8002" },
       { name = "KONG_ADMIN_GUI_AUTH", value = "basic-auth" },
-      { name = "KONG_ADMIN_GUI_AUTH_CONF", value = "{\"secret\":\"kong-secret\"}" },
-      { name = "KONG_ADMIN_GUI_SESSION_CONF", value = "{\"secret\":\"kong-session-secret\"}" },
       { name = "KONG_ENFORCE_RBAC", value = "off" },
       { name = "KONG_LOG_LEVEL", value = "info" },
       { name = "KONG_PREFIX", value = "/usr/local/kong" },
       { name = "KONG_DECLARATIVE_CONFIG_STRING", value = local.kong_config_string }
+    ]
+    secrets = [
+      { name = "KONG_ADMIN_GUI_AUTH_CONF", valueFrom = aws_secretsmanager_secret.kong_admin_gui_auth_conf.arn },
+      { name = "KONG_ADMIN_GUI_SESSION_CONF", valueFrom = aws_secretsmanager_secret.kong_admin_gui_session_conf.arn }
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -207,6 +211,42 @@ locals {
   } : null
 }
 
+resource "random_password" "kong_admin_gui_auth_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "kong_admin_gui_session_secret" {
+  length  = 64
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "kong_admin_gui_auth_conf" {
+  name_prefix = "${var.name_prefix}-kong-admin-gui-auth-"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-admin-gui-auth"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "kong_admin_gui_auth_conf" {
+  secret_id     = aws_secretsmanager_secret.kong_admin_gui_auth_conf.id
+  secret_string = jsonencode({ secret = random_password.kong_admin_gui_auth_secret.result })
+}
+
+resource "aws_secretsmanager_secret" "kong_admin_gui_session_conf" {
+  name_prefix = "${var.name_prefix}-kong-admin-gui-session-"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-admin-gui-session"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "kong_admin_gui_session_conf" {
+  secret_id     = aws_secretsmanager_secret.kong_admin_gui_session_conf.id
+  secret_string = jsonencode({ secret = random_password.kong_admin_gui_session_secret.result })
+}
+
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -269,20 +309,26 @@ resource "aws_security_group" "alb" {
     cidr_blocks = [var.admin_cidr]
   }
 
-  ingress {
-    description = "Kong Admin API"
-    from_port   = var.admin_port
-    to_port     = var.admin_port
-    protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
+  dynamic "ingress" {
+    for_each = local.publish_admin_api ? [1] : []
+    content {
+      description = "Kong Admin API"
+      from_port   = var.admin_port
+      to_port     = var.admin_port
+      protocol    = "tcp"
+      cidr_blocks = [var.admin_cidr]
+    }
   }
 
-  ingress {
-    description = "Kong Manager UI"
-    from_port   = var.manager_port
-    to_port     = var.manager_port
-    protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
+  dynamic "ingress" {
+    for_each = local.publish_manager_ui ? [1] : []
+    content {
+      description = "Kong Manager UI"
+      from_port   = var.manager_port
+      to_port     = var.manager_port
+      protocol    = "tcp"
+      cidr_blocks = [var.admin_cidr]
+    }
   }
 
   egress {
@@ -497,6 +543,27 @@ resource "aws_iam_role_policy_attachment" "execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+resource "aws_iam_role_policy" "execution_secrets" {
+  name = "${var.name_prefix}-execution-secrets"
+  role = aws_iam_role.execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          aws_secretsmanager_secret.kong_admin_gui_auth_conf.arn,
+          aws_secretsmanager_secret.kong_admin_gui_session_conf.arn
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role" "task" {
   count = var.enable_managed_observability ? 1 : 0
 
@@ -646,6 +713,12 @@ resource "aws_ecs_task_definition" "this" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-task"
   })
+
+  depends_on = [
+    aws_iam_role_policy.execution_secrets,
+    aws_secretsmanager_secret_version.kong_admin_gui_auth_conf,
+    aws_secretsmanager_secret_version.kong_admin_gui_session_conf
+  ]
 }
 
 resource "aws_ecs_service" "this" {
@@ -685,6 +758,7 @@ resource "aws_ecs_service" "this" {
     aws_lb_listener.admin,
     aws_lb_listener.manager,
     aws_iam_role_policy_attachment.execution,
+    aws_iam_role_policy.execution_secrets,
     aws_prometheus_rule_group_namespace.alerts,
     aws_prometheus_rule_group_namespace.recording
   ]

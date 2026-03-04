@@ -1,7 +1,9 @@
 aws_region            = "ap-southeast-1"
-admin_cidr            = "0.0.0.0/0"
+admin_cidr            = "203.0.113.10/32"
 subnet_cidr           = "10.20.1.0/24"
 secondary_subnet_cidr = "10.20.2.0/24"
+publish_admin_api     = false
+publish_manager_ui    = false
 desired_count         = 1
 min_capacity          = 1
 max_capacity          = 4
@@ -19,4 +21,5 @@ observability_scrape_interval = "10s"
 # Kong runs on ECS/Fargate behind an ALB in the AWS target.
 # Managed observability adds an AMP workspace, an AMG workspace, and a Prometheus sidecar
 # in the ECS task that scrapes Kong and remote-writes metrics to AMP.
-# Adjust the task size, scaling targets, or CIDR values here if your environment needs them.
+# Keep admin_cidr narrow and only flip publish_admin_api / publish_manager_ui to true
+# when you explicitly need direct public management access.

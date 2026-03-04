@@ -18,8 +18,8 @@ variable "name_prefix" {
 
 variable "admin_cidr" {
   type        = string
-  description = "CIDR allowed to reach the Kong load balancer ports."
-  default     = "0.0.0.0/0"
+  description = "CIDR allowed to reach published management ports when they are enabled."
+  default     = "203.0.113.10/32"
 }
 
 variable "vpc_cidr" {
@@ -62,6 +62,18 @@ variable "manager_port" {
   type        = number
   description = "Public port mapped to the Kong Manager UI."
   default     = 8002
+}
+
+variable "publish_admin_api" {
+  type        = bool
+  description = "Whether to publish the Kong Admin API through the ALB."
+  default     = false
+}
+
+variable "publish_manager_ui" {
+  type        = bool
+  description = "Whether to publish the Kong Manager UI through the ALB."
+  default     = false
 }
 
 variable "desired_count" {

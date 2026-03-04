@@ -8,7 +8,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
     ports:
-      - "{{ observability_prometheus_port }}:9090"
+      - "{{ observability_prometheus_bind_host }}:{{ observability_prometheus_port }}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro
@@ -20,12 +20,12 @@ services:
   grafana:
     image: {{ observability_grafana_image }}
     container_name: {{ kong_name_prefix }}-grafana
+    env_file:
+      - ./grafana.env
     environment:
-      GF_SECURITY_ADMIN_USER: {{ observability_grafana_admin_user }}
-      GF_SECURITY_ADMIN_PASSWORD: {{ observability_grafana_admin_password }}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "{{ observability_grafana_port }}:3000"
+      - "{{ observability_grafana_bind_host }}:{{ observability_grafana_port }}:3000"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/etc/grafana/dashboards:ro
