@@ -1,6 +1,7 @@
 .backups/
 .auto-remediation/
 .local-runtime/
+.local-runtime/*
 anisible/.secrets/
 deployment/kong/kong.env
 promethusGrafana/grafana.env
