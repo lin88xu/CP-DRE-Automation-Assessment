@@ -2,9 +2,11 @@ aws_region                    = "ap-southeast-1"
 admin_cidr                    = "0.0.0.0/0"
 subnet_cidr                   = "10.20.1.0/24"
 secondary_subnet_cidr         = "10.20.2.0/24"
+publish_admin_api             = true
+publish_manager_ui            = false
 desired_count                 = 1
 min_capacity                  = 1
-max_capacity                  = 4
+max_capacity                  = 1
 task_cpu                      = 1024
 task_memory                   = 2048
 cpu_target_value              = 60
@@ -15,6 +17,9 @@ scale_out_cooldown            = 60
 enable_managed_observability  = true
 observability_kong_job_name   = "kong-admin"
 observability_scrape_interval = "10s"
+enable_efs_backups            = true
+efs_backup_schedule           = "cron(0 5 ? * * *)"
+efs_backup_delete_after_days  = 35
 grafana_admin_user_ids = [
   "c4780468-f0f1-70e2-97fc-61cabad4184b"
 ]
@@ -27,11 +32,10 @@ enable_grafana_dashboard_bootstrap          = true
 grafana_dashboard_service_account_token_ttl = 14400
 grafana_prometheus_datasource_name          = "Amazon Managed Service for Prometheus"
 
-# Kong runs on ECS/Fargate behind an ALB in the AWS target.
+# Kong runs on ECS/Fargate behind an ALB in the AWS target, with PostgreSQL
+# persisted on EFS and protected by AWS Backup.
 # Managed observability adds an AMP workspace, an AMG workspace, and a Prometheus
 # sidecar in the ECS task that scrapes Kong and remote-writes to AMP.
-# Fill the Grafana IAM Identity Center user/group IDs above if you want Terraform
-# to grant AMG workspace access during deployment. Do not place the same user or
-# group ID in more than one role list. Terraform also bootstraps the AMG workspace
-# with an AMP data source and the "Kong (official)" dashboard.
-# Adjust the task size, scaling targets, or CIDR values here if your environment needs them.
+# Leave publish_admin_api and publish_manager_ui disabled unless you explicitly
+# need direct public management access, and keep desired_count/min_capacity/
+# max_capacity at 1 for this task-local PostgreSQL design.

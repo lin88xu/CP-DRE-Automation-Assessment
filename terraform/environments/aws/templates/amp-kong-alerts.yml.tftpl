@@ -8,7 +8,7 @@ groups:
           severity: critical
         annotations:
           summary: Kong metrics endpoint is down
-          description: Prometheus has not been able to scrape Kong Admin API metrics for 2 minutes.
+          description: Prometheus has not been able to scrape Kong's internal Status API metrics for 2 minutes.
 
       - alert: KongTrafficMissing
         expr: absent(kong_http_requests_total)

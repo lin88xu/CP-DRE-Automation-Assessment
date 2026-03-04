@@ -1,5 +1,3 @@
-version: '3.5'
-
 services:
   # PostgreSQL Database
   kong-db:
@@ -8,36 +6,65 @@ services:
     environment:
       POSTGRES_DB: kong
       POSTGRES_USER: kong
-      POSTGRES_PASSWORD: kong
+      POSTGRES_PASSWORD: ${KONG_PG_PASSWORD:-change-me}
     ports:
       - "5432:5432"
     volumes:
       - kong-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "kong"]
+      test: ["CMD", "pg_isready", "-U", "kong", "-d", "kong"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - kong-network
+      kong-network:
+        aliases:
+          - kong
 
-  # Kong Gateway
+  kong-bootstrap:
+    image: kong:latest
+    container_name: kong-bootstrap
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_PORT: 5432
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD:-change-me}
+      KONG_PG_DATABASE: kong
+      KONG_LOG_LEVEL: info
+    volumes:
+      - ./docker-kong.yml:/etc/kong/docker-kong.yml:ro
+    networks:
+      - kong-network
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if ! kong migrations bootstrap; then
+          kong migrations up -y || true
+          kong migrations finish -y || true
+        fi
+        kong config db_import /etc/kong/docker-kong.yml
+
   kong:
     image: kong:latest
     container_name: kong
     depends_on:
-      - kong-db
+      kong-db:
+        condition: service_healthy
+      kong-bootstrap:
+        condition: service_completed_successfully
     environment:
-      # Database Configuration - Using DB-less mode for easier local development
-      KONG_DATABASE: "off"
-      # Uncomment below to use PostgreSQL instead
-      # KONG_DATABASE: postgres
-      # KONG_PG_HOST: kong-db
-      # KONG_PG_PORT: 5432
-      # KONG_PG_USER: kong
-      # KONG_PG_PASSWORD: kong
-      # KONG_PG_DATABASE: kong
-      # KONG_PG_SCHEMA: kong
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_PORT: 5432
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD:-change-me}
+      KONG_PG_DATABASE: kong
 
       # Proxy Settings
       KONG_PROXY_ACCESS_LOG: /dev/stdout
@@ -53,8 +80,8 @@ services:
       KONG_ADMIN_GUI_URL: http://localhost:8002
       KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002
       KONG_ADMIN_GUI_AUTH: basic-auth
-      KONG_ADMIN_GUI_AUTH_CONF: '{"secret":"kong-secret"}'
-      KONG_ADMIN_GUI_SESSION_CONF: '{"secret":"kong-session-secret"}'
+      KONG_ADMIN_GUI_AUTH_CONF: '${KONG_ADMIN_GUI_AUTH_CONF:-{"secret":"local-dev-kong-admin-secret"}}'
+      KONG_ADMIN_GUI_SESSION_CONF: '${KONG_ADMIN_GUI_SESSION_CONF:-{"secret":"local-dev-kong-session-secret"}}'
       KONG_ENFORCE_RBAC: "off"
 
       # Logging & Debugging
@@ -62,14 +89,10 @@ services:
 
       # Prefix
       KONG_PREFIX: /usr/local/kong
-
-      # DB-less mode configuration
-      KONG_DECLARATIVE_CONFIG: /etc/kong/docker-kong.yml
-      KONG_DECLARATIVE_CONFIG_ENCODED: "false"
     ports:
       - "8000:8000"  # Proxy (HTTP)
-      - "8001:8001"  # Admin API (HTTP)
-      - "8002:8002"  # Manager UI (Frontend)
+      - "127.0.0.1:8001:8001"  # Admin API (HTTP)
+      - "127.0.0.1:8002:8002"  # Manager UI (Frontend)
     volumes:
       - kong-data:/usr/local/kong
       - ./docker-kong.yml:/etc/kong/docker-kong.yml:ro
@@ -80,7 +103,7 @@ services:
       retries: 5
     networks:
       - kong-network
-    command: "kong docker-start"
+    command: ["kong", "docker-start"]
 
 volumes:
   kong-db-data:
@@ -91,3 +114,4 @@ volumes:
 networks:
   kong-network:
     driver: bridge
+    name: assessment-kong-network

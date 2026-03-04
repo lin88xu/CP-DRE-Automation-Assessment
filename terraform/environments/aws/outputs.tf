@@ -17,8 +17,3 @@ output "grafana_workspace_url" {
   value       = module.kong.grafana_workspace_url
   description = "Amazon Managed Grafana workspace URL."
 }
-
-output "grafana_kong_dashboard_url" {
-  value       = module.kong.grafana_kong_dashboard_url
-  description = "Direct URL to the imported Kong official dashboard in Amazon Managed Grafana."
-}

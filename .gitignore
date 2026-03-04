@@ -1,0 +1,10 @@
+# Local deployment artifacts
+.local-runtime/
+.auto-remediation/
+
+# Generated local secrets
+anisible/.secrets/
+
+# Python cache
+__pycache__/
+*.pyc

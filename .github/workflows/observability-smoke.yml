@@ -13,6 +13,10 @@ on:
       - ".github/workflows/observability-smoke.yml"
       - "promethusGrafana/**"
       - "deployment/kong/**"
+      - "tests/TP_REMOTE_STACK_VERIFICATION_V001.py"
+      - "tests/TP_REMOTE_STACK_VERIFICATION_V001.md"
+      - "tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py"
+      - "tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.md"
       - "README.md"
   workflow_dispatch:
 
@@ -56,35 +60,6 @@ jobs:
             -f deployment/kong/docker-compose.yml \
             up -d
 
-      - name: Wait for Kong Admin API and metrics
-        id: kong_metrics
-        run: |
-          python3 - <<'PY'
-          import time
-          import urllib.request
-
-          def wait_for(url, needle=None, timeout=120):
-              deadline = time.time() + timeout
-              while time.time() < deadline:
-                  try:
-                      with urllib.request.urlopen(url, timeout=5) as response:
-                          body = response.read().decode()
-                      if needle is None or needle in body:
-                          return body
-                  except Exception:
-                      pass
-                  time.sleep(2)
-              raise SystemExit(f"Timed out waiting for {url}")
-
-          status = wait_for("http://localhost:8001/status")
-          metrics = wait_for("http://localhost:8001/metrics", "kong_")
-
-          with open("ci-artifacts/observability/kong-status.json", "w", encoding="utf-8") as handle:
-              handle.write(status)
-          with open("ci-artifacts/observability/kong-metrics.txt", "w", encoding="utf-8") as handle:
-              handle.write(metrics)
-          PY
-
       - name: Start observability stack
         id: observability_up
         run: |
@@ -93,67 +68,17 @@ jobs:
             -f promethusGrafana/docker-compose.yml \
             up -d
 
-      - name: Wait for Prometheus and Grafana
-        id: observability_checks
+      - name: Run local stack verification
+        id: local_stack_verification
         run: |
-          python3 - <<'PY'
-          import json
-          import time
-          import urllib.request
+          set -o pipefail
+          python3 tests/TP_REMOTE_STACK_VERIFICATION_V001.py 2>&1 | tee ci-artifacts/observability/local-stack-verification.log
 
-          def fetch_json(url):
-              with urllib.request.urlopen(url, timeout=5) as response:
-                  return json.loads(response.read().decode())
-
-          deadline = time.time() + 180
-          grafana_payload = None
-          targets_payload = None
-
-          while time.time() < deadline:
-              try:
-                  grafana_payload = fetch_json("http://localhost:3000/api/health")
-              except Exception:
-                  grafana_payload = None
-
-              try:
-                  targets_payload = fetch_json("http://localhost:9090/api/v1/targets")
-              except Exception:
-                  targets_payload = None
-
-              grafana_ok = grafana_payload is not None and grafana_payload.get("database") == "ok"
-              prometheus_ok = False
-              if targets_payload is not None:
-                  active = targets_payload.get("data", {}).get("activeTargets", [])
-                  prometheus_ok = any(
-                      target.get("labels", {}).get("job") == "kong-admin"
-                      and target.get("health") == "up"
-                      for target in active
-                  )
-
-              if grafana_ok and prometheus_ok:
-                  break
-
-              time.sleep(3)
-
-          if grafana_payload is not None:
-              with open("ci-artifacts/observability/grafana-health.json", "w", encoding="utf-8") as handle:
-                  json.dump(grafana_payload, handle, indent=2)
-          if targets_payload is not None:
-              with open("ci-artifacts/observability/prometheus-targets.json", "w", encoding="utf-8") as handle:
-                  json.dump(targets_payload, handle, indent=2)
-
-          if grafana_payload is None or grafana_payload.get("database") != "ok":
-              raise SystemExit("Grafana health check failed")
-
-          active = targets_payload.get("data", {}).get("activeTargets", []) if targets_payload else []
-          prometheus_ok = any(
-              target.get("labels", {}).get("job") == "kong-admin"
-              and target.get("health") == "up"
-              for target in active
-          )
-          if not prometheus_ok:
-              raise SystemExit("Prometheus never observed kong-admin as up")
-          PY
+      - name: Run dashboard content verification
+        id: dashboard_content
+        run: |
+          set -o pipefail
+          python3 tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py 2>&1 | tee ci-artifacts/observability/dashboard-content.log
 
       - name: Record container status
         if: always()
@@ -180,8 +105,8 @@ jobs:
         env:
           KONG_CONFIG: ${{ steps.kong_config.conclusion }}
           OBSERVABILITY_CONFIG: ${{ steps.observability_config.conclusion }}
-          KONG_METRICS: ${{ steps.kong_metrics.conclusion }}
-          OBSERVABILITY_CHECKS: ${{ steps.observability_checks.conclusion }}
+          LOCAL_STACK_VERIFICATION: ${{ steps.local_stack_verification.conclusion }}
+          DASHBOARD_CONTENT: ${{ steps.dashboard_content.conclusion }}
         run: |
           status_text() {
             if [ "$1" = "success" ]; then
@@ -200,8 +125,8 @@ jobs:
             echo "| --- | --- |"
             echo "| Kong compose config | $(status_text "$KONG_CONFIG") |"
             echo "| Observability compose config | $(status_text "$OBSERVABILITY_CONFIG") |"
-            echo "| Kong metrics endpoint | $(status_text "$KONG_METRICS") |"
-            echo "| Grafana health and Prometheus scrape | $(status_text "$OBSERVABILITY_CHECKS") |"
+            echo "| Local stack verification | $(status_text "$LOCAL_STACK_VERIFICATION") |"
+            echo "| Dashboard content verification | $(status_text "$DASHBOARD_CONTENT") |"
             echo
             echo "Artifacts: \`observability-smoke-logs\`"
           } >> "$GITHUB_STEP_SUMMARY"

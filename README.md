@@ -1,52 +1,38 @@
 # CP DRE Automation Assessment
 
-This repository packages Kong Gateway as the application under assessment and wraps it with infrastructure automation, configuration management, CI/CD, and observability.
+This repository packages Kong Gateway as the application under assessment and wraps it with infrastructure automation, CI/CD, observability, and recovery controls.
 
-The same deployment model is intended to work across:
-
-- Local Docker
-- AWS
-- Azure
+This branch is written around the AWS deployment path. The repository still contains local and Azure artifacts, but the primary runtime described here is Kong on AWS ECS/Fargate.
 
 ## Prerequisites
 
-Before running the local deployment flow yourself, make sure these are installed on the machine where you will run Terraform and Ansible:
+Before working with the AWS deployment branch, make sure the operator environment has:
 
 - `git`
-- `docker` with `docker compose` available
 - `terraform`
 - `python3`
-- `pip`
-- `ansible` / `ansible-playbook`
-
-Local deployment assumptions:
-
-- Docker daemon is running and your user can access it
-- You have `sudo` access for the Ansible `become` steps
-- Internet access is available to pull container images and packages
-- If you run from WSL under `/mnt/c/...`, Ansible may ignore the local `ansible.cfg` unless `ANSIBLE_CONFIG` is set explicitly
+- AWS credentials available through the standard provider chain or HCP Terraform workspace variables
+- access to the target AWS account and region
 
 Useful preflight checks:
 
 ```bash
-docker version
-docker compose version
 terraform version
-ansible-playbook --version
 python3 --version
+aws sts get-caller-identity
 ```
 
 ## Architecture Overview
 
-The solution is organized as a layered delivery model:
+The AWS branch is organized as a layered delivery model:
 
-1. Terraform provisions the target environment.
-2. Ansible configures the target host and deploys the application and observability stack.
-3. Kong runs as the API gateway and management plane.
-4. Prometheus scrapes Kong metrics.
-5. Grafana visualizes service health and request behavior.
-6. GitHub Actions validates Terraform, lints Ansible, and smoke-tests the observability path.
-7. A gated AWS deployment workflow runs `terraform plan` and `terraform apply` after the validation workflows succeed.
+1. GitHub Actions validates infrastructure and observability changes before deployment.
+2. Terraform provisions the AWS network, ECS service, persistent storage, secrets, observability backends, and recovery controls.
+3. ECS/Fargate runs PostgreSQL, Kong bootstrap, Kong runtime, and the Prometheus agent sidecar in one coordinated task.
+4. Kong serves proxy traffic through the ALB and stores its runtime state in PostgreSQL on EFS.
+5. The Prometheus sidecar scrapes Kong metrics and remote-writes them to AMP.
+6. AMG queries AMP and presents dashboards for operators.
+7. CloudWatch Logs, ECS rollback, and AWS Backup provide the operational recovery path.
 
 High-level flow:
 
@@ -133,28 +119,96 @@ This repository contains the required deliverables from the assessment brief:
   [kong/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/kong),
   [anisible/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible),
   [promethusGrafana/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana)
+- Recovery and operations documentation:
+  [docs/AWS_RECOVERY_RUNBOOK.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/docs/AWS_RECOVERY_RUNBOOK.md)
+- Verification assets:
+  [tests/TP_REMOTE_STACK_VERIFICATION_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_REMOTE_STACK_VERIFICATION_V001.py),
+  [tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py),
+  [tests/TP_APPLICATION_FAILURE_RECOVERY_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_APPLICATION_FAILURE_RECOVERY_V001.py),
+  [tests/TP_MISCONFIGURATION_RECOVERY_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_MISCONFIGURATION_RECOVERY_V001.py)
+  These verification assets are used against the remote AWS deployment shape by default.
+
+## Assessment Compliance
+
+This section maps the assessment brief directly to the repository files that implement each requirement.
+
+- Infrastructure as Code:
+  `terraform/environments/aws/main.tf`, `terraform/environments/aws/modules/aws-ecs-service/main.tf`, `terraform/environments/aws/variables.tf`
+- Environment can be recreated from scratch:
+  `terraform/disaster-recovery.sh`, `docs/AWS_RECOVERY_RUNBOOK.md`, `terraform/environments/aws/terraform.tfvars`
+- Clear separation between infrastructure, application, and configuration:
+  `terraform/`, `kong/`, `terraform/environments/aws/templates/docker-kong.yml.tftpl`
+- Configuration management through Ansible or equivalent:
+  `anisible/playbooks/site.yml`, `anisible/roles/kong/tasks/main.yml`, `anisible/roles/observability/tasks/main.yml`, plus AWS ECS bootstrap logic in `terraform/environments/aws/modules/aws-ecs-service/main.tf`
+- CI/CD pipeline through GitHub Actions:
+  `.github/workflows/terraform-ci.yml`, `.github/workflows/ansible-ci.yml`, `.github/workflows/observability-smoke.yml`, `.github/workflows/aws-deploy.yml`
+- Validation, plan, and deployment stages:
+  `.github/workflows/terraform-ci.yml`, `.github/workflows/aws-deploy.yml`
+- Safe change practices:
+  `.github/workflows/aws-deploy.yml`, `docs/AWS_RECOVERY_RUNBOOK.md`, ECS deployment settings in `terraform/environments/aws/modules/aws-ecs-service/main.tf`
+- Observability with logs and metrics:
+  `terraform/environments/aws/modules/aws-ecs-service/main.tf`, `terraform/environments/aws/templates/amp-kong-alerts.yml.tftpl`, `tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py`
+- Explanation of important signals and operator investigation path:
+  this README under `Observability Approach`, plus `docs/AWS_RECOVERY_RUNBOOK.md`
+- Resiliency and recovery thinking:
+  this README under `Resiliency Design`, `docs/AWS_RECOVERY_RUNBOOK.md`, `terraform/disaster-recovery.sh`
+- At least two failure scenarios with recovery:
+  `tests/TP_APPLICATION_FAILURE_RECOVERY_V001.py`, `tests/TP_MISCONFIGURATION_RECOVERY_V001.py`
+- README coverage for architecture, observability, resiliency, tradeoffs, and assumptions:
+  this README
 
 ## Infrastructure As Code
 
-Terraform supports three targets:
+This branch is centered on the AWS target:
 
-- `terraform/environments/local`: prepares the local host handoff for Ansible and validates Docker availability
-- `terraform/environments/aws`: provisions an AWS ECS/Fargate environment with an Application Load Balancer and ECS service autoscaling for Kong
-- `terraform/environments/azure`: provisions a single-host Azure environment and boots Kong with Docker Compose
+- `terraform/environments/aws`: provisions the AWS runtime, observability stack, and recovery controls for Kong on ECS/Fargate
 
 ### AWS Architecture
 
-The AWS target uses a container-native deployment model:
+The AWS deployment is a container-native, single-service Kong stack with managed observability and recovery controls around it.
 
-- A dedicated VPC with two public subnets across two availability zones
-- An internet-facing Application Load Balancer exposing Kong proxy, Admin API, and Manager ports
-- An ECS cluster running Kong on Fargate in DB-less mode
-- CloudWatch Logs for container log collection
-- ECS service autoscaling driven by CPU utilization, memory utilization, and ALB request count on the proxy target group
+Core AWS services and their responsibilities:
 
-Traffic flow:
+- Amazon VPC with two public subnets across two availability zones provides the network boundary for the ALB, ECS task ENIs, and EFS mount targets.
+- Application Load Balancer is the only public entry point and routes external traffic to Kong proxy on port `8000`. Admin API and Manager listeners exist but are only opened when explicitly enabled.
+- Amazon ECS on Fargate runs one task definition that contains four cooperating containers: PostgreSQL, Kong bootstrap, Kong runtime, and the Prometheus agent sidecar.
+- Amazon EFS persists the PostgreSQL data directory so Kong configuration state survives task replacement and can be restored independently of the ECS task lifecycle.
+- AWS Secrets Manager stores the PostgreSQL password and Kong Manager secrets and injects them into the task at runtime.
+- Amazon Managed Service for Prometheus receives remote-written metrics from the sidecar and stores them outside the task.
+- Amazon Managed Grafana queries AMP and serves the operator dashboards.
+- Amazon CloudWatch Logs collects logs from `postgres`, `kong-bootstrap`, `kong`, and `amp-collector`.
+- AWS Backup protects the EFS file system that holds PostgreSQL data.
 
-`Client -> ALB -> ECS/Fargate Kong task -> upstream service`
+How the AWS services work together:
+
+- Request path:
+  `Client -> ALB -> Kong proxy in ECS/Fargate -> upstream service`
+- Configuration bootstrap path:
+  `Terraform renders Kong config -> Kong bootstrap container runs migrations -> config is imported into PostgreSQL -> Kong runtime starts against PostgreSQL`
+- State path:
+  `PostgreSQL writes to EFS -> AWS Backup snapshots EFS -> recovery can restore data before ECS is redeployed`
+- Secrets path:
+  `Secrets Manager -> ECS task injection -> PostgreSQL and Kong containers consume secrets at start time`
+- Observability path:
+  `Kong Prometheus plugin -> Kong internal Status API -> Prometheus sidecar in agent mode -> AMP remote write -> AMG dashboards`
+- Incident path:
+  `CloudWatch logs + AMP metrics + AMG dashboards -> operator diagnosis -> ECS rollback or EFS restore depending on failure mode`
+
+Container interaction inside the ECS task:
+
+- `postgres` starts first and exposes a task-local database endpoint.
+- `kong-bootstrap` waits for PostgreSQL health, runs Kong migrations, and imports the declarative configuration into PostgreSQL.
+- `kong` waits for both PostgreSQL health and bootstrap success before serving traffic through the ALB.
+- `amp-collector` scrapes Kong's internal Status API on a task-local port and remote-writes those metrics to AMP.
+
+Operational posture:
+
+- Kong runs in PostgreSQL-backed mode, not DB-less mode.
+- Management endpoints are not publicly exposed unless `publish_admin_api` or `publish_manager_ui` is enabled.
+- Metrics collection is isolated from the public management surface by scraping the internal Status API inside the task.
+- The Prometheus collector runs in agent mode and forwards data to AMP instead of keeping a full local TSDB.
+- Recovery is centered on EFS persistence and AWS Backup rather than trying to preserve ECS task instances.
+- The ECS service is intentionally constrained to one task because PostgreSQL is task-local even though its data directory is persisted on EFS.
 
 Shared templates keep the Kong deployment model consistent across all targets:
 
@@ -163,24 +217,28 @@ Shared templates keep the Kong deployment model consistent across all targets:
 
 Design intent:
 
-- Separate infrastructure from application configuration
-- Recreate environments from scratch
-- Reuse the same Kong packaging across local, AWS, and Azure
+- Keep the runtime AWS-native and hostless.
+- Separate infrastructure provisioning, Kong bootstrap, and observability concerns.
+- Make rollback, backup, and recovery explicit rather than implied.
+- Preserve a rebuild-from-Git workflow through Terraform.
 
 ## Configuration Management
 
-Ansible provides the configuration-management layer:
+For this AWS branch, Terraform owns the deployment flow end to end:
 
-- Installs or validates Docker on the target host
-- Renders Kong Compose and declarative config
-- Renders Prometheus and Grafana config
-- Starts both stacks with Docker Compose
+- renders the Kong declarative configuration used during bootstrap
+- defines the ECS task composition and startup ordering
+- wires Secrets Manager, EFS, Backup, AMP, AMG, IAM, and CloudWatch together
+- bootstraps the AMG data source and dashboard import
 
-Scope note:
+Ansible is used for non-AWS targets, while AWS uses ECS bootstrap as the equivalent configuration-management mechanism.
 
-- Ansible is the deployment layer for the local and Azure host-based paths.
-- The local path uses Terraform to generate the Ansible inventory and variables handoff before Ansible deploys Kong and observability.
-- The AWS target is container-native and packages Kong directly into ECS/Fargate with Terraform.
+In practice, configuration management is split across these stages:
+
+- Terraform renders the Kong declarative config and injects it into the bootstrap container.
+- `kong-bootstrap` applies migrations and imports the config into PostgreSQL before the runtime container starts.
+- ECS container dependencies enforce the startup order so Kong does not begin serving traffic against an uninitialized datastore.
+- Grafana and AMP configuration is managed from Terraform so the observability path is created alongside the application stack.
 
 Key files:
 
@@ -188,6 +246,38 @@ Key files:
 - [anisible/roles/kong/tasks/main.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/roles/kong/tasks/main.yml)
 - [anisible/roles/observability/tasks/main.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/roles/observability/tasks/main.yml)
 - [anisible/playbooks/group_vars/all.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/playbooks/group_vars/all.yml)
+
+## Security Hygiene
+
+The AWS deployment favors reducing public exposure and moving secrets and diagnostics into managed services.
+
+- Only the proxy listener is intended to be public by default; Admin API and Manager are published only when explicitly enabled.
+- Secrets are not hard-coded in task definitions. PostgreSQL and Kong Manager secrets are stored in Secrets Manager and injected into the task at runtime.
+- Metrics scraping stays inside the ECS task by using Kong's internal Status API rather than exposing a public metrics endpoint.
+- Grafana access is mediated through AWS SSO / IAM Identity Center and the AMG workspace role configuration.
+- CloudWatch centralizes logs instead of depending on shell access to hosts or containers.
+- EFS backups and Terraform-driven rebuilds reduce the need for risky in-place manual repairs during incidents.
+
+## Persistent Data
+
+Persistent state in this branch is deliberately narrow and centered on Kong's PostgreSQL datastore.
+
+- PostgreSQL runs as a task-local container inside the ECS task.
+- Its data directory is mounted on EFS so task replacement does not automatically destroy Kong state.
+- AWS Backup protects that EFS file system on a schedule, which gives the branch a recovery point outside ECS.
+- AMP and AMG hold observability data and dashboards outside the application task, so telemetry survives task restarts even when the workload is replaced.
+- This persistence model is the reason the ECS service is intentionally kept at a single task: the database process is still local to the task even though its files are durable.
+
+## Operations / Recovery
+
+Day-2 operations in this branch are built around managed service visibility plus explicit recovery paths.
+
+- ECS service events show rollout, health-check, and rollback activity.
+- CloudWatch log streams from `postgres`, `kong-bootstrap`, `kong`, and `amp-collector` provide the first troubleshooting surface.
+- AMG dashboards and AMP queries show request rate, latency, and scrape health once traffic is flowing.
+- ECS deployment circuit breaker provides the automatic rollback path for unhealthy revisions.
+- EFS plus AWS Backup provides the data recovery path when the PostgreSQL state is corrupted or lost.
+- The repository runbook in [docs/AWS_RECOVERY_RUNBOOK.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/docs/AWS_RECOVERY_RUNBOOK.md) documents the operator recovery order and rebuild workflow.
 
 ## CI/CD And GitOps Flow
 
@@ -234,13 +324,15 @@ AWS deployment workflow prerequisites:
 
 ## Observability Approach
 
-The observability stack is under [promethusGrafana/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana).
+The AWS observability path is split between in-task collection and managed AWS backends.
 
 Components:
 
-- Prometheus for metrics collection
-- Grafana for dashboarding
-- Kong `prometheus` plugin enabled in declarative config
+- Kong `prometheus` plugin exposes metrics from inside the ECS task
+- Prometheus sidecar runs in agent mode and scrapes Kong's internal Status API
+- Amazon Managed Service for Prometheus stores and serves the metric series
+- Amazon Managed Grafana provides dashboards and Explore queries
+- CloudWatch Logs captures container logs for runtime troubleshooting
 
 Important signals:
 
@@ -265,10 +357,11 @@ Relevant files:
 
 Operator investigation path:
 
-1. Check Grafana dashboard health and request rate.
-2. Check Prometheus target status for `kong-admin`.
-3. Query Kong `/status` and `/metrics`.
-4. Inspect container logs with Docker Compose.
+1. Check the AMG dashboard or Explore query for `up{job="kong-admin",scrape_target="kong"}`.
+2. Confirm sample traffic is reaching the ALB and Kong proxy.
+3. Inspect `amp-collector` and `kong` log streams in CloudWatch.
+4. Check ECS service events for deployment health or rollback activity.
+5. If the service is healthy but metrics are missing, validate the AMP datasource and query path in Grafana.
 
 ## Resiliency Design
 
@@ -277,129 +370,67 @@ The design focuses on simple, observable failure handling rather than high-avail
 Failure scenarios covered by the design:
 
 1. Application failure:
-   Kong container stops or fails health checks.
-   Expected behavior: Docker restart policy and health checks expose the problem quickly.
-   Recovery: restart the stack or re-run Ansible deployment.
+   Kong container stops or the ECS service fails health checks.
+   Expected behavior: ECS marks the deployment unhealthy and can roll back automatically through the deployment circuit breaker.
+   Recovery: inspect ECS service events and CloudWatch logs, then redeploy or roll back to the last known-good Terraform commit.
 
 2. Dependency failure:
    Upstream service is unreachable or slow.
-   Expected behavior: Kong request errors and latency metrics increase.
-   Recovery: inspect upstream, adjust routing, or roll back config.
+   Expected behavior: Kong request errors and latency metrics increase in AMP and Grafana.
+   Recovery: inspect upstream reachability, adjust routing, or roll back the upstream-related change.
 
 3. Misconfiguration:
-   Broken declarative config or invalid deployment change.
-   Expected behavior: CI validation or smoke test should fail before rollout.
-   Recovery: fix config in Git and redeploy, or revert to last known-good commit.
+   Broken declarative config or invalid infrastructure change is deployed.
+   Expected behavior: CI or Terraform validation should fail before rollout; if it reaches ECS, the service should fail health checks or stop producing expected traffic/metrics.
+   Recovery: fix the configuration in Git and redeploy, or re-apply the last known-good commit.
 
-4. Telemetry failure:
-   Prometheus cannot scrape Kong metrics.
-   Expected behavior: Prometheus target becomes `down` and alerts fire.
-   Recovery: inspect Kong Admin API, networking, or plugin configuration.
+4. State failure:
+   PostgreSQL data becomes damaged or unavailable.
+   Expected behavior: Kong bootstrap or runtime fails against the persisted data path.
+   Recovery: restore the EFS-backed PostgreSQL data through AWS Backup, then redeploy the ECS service.
 
-## Local Usage
+5. Telemetry failure:
+   The Prometheus sidecar cannot scrape Kong or remote-write to AMP.
+   Expected behavior: `up{job="kong-admin",scrape_target="kong"}` drops, dashboards go blank, and `amp-collector` logs show scrape or remote-write errors.
+   Recovery: inspect `amp-collector` and `kong` logs in CloudWatch, then validate the Status API scrape path, IAM permissions, and AMG datasource configuration.
 
-Terraform handoff plus Ansible deployment:
+## Failure Demo Assets
 
-```bash
-cd terraform/environments/local
-terraform init
-terraform apply
-```
+The failure walkthroughs now live as runnable test assets under `tests/` instead of being embedded inline in this README.
 
-```bash
-cd <repo-root>/anisible
-
-ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
-ansible-playbook \
-  -K \
-  -i ../terraform/environments/local/generated/hosts.yml \
-  playbooks/site.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
-```
-
-Replace `<repo-root>` with the directory where you cloned this repository. For example, that might be `/home/<user>/CP-DRE-Automation-Assessment` on Linux, or `/mnt/c/.../CP-DRE-Automation-Assessment` under WSL if the repo lives on a Windows-mounted drive.
-
-If you run the repository from WSL under `/mnt/c/...`, Ansible treats that path as world-writable and ignores the local `ansible.cfg` unless `ANSIBLE_CONFIG` is set explicitly. If you prefer not to rely on `ansible.cfg`, use:
-
-```bash
-cd <repo-root>/anisible
-
-ANSIBLE_ROLES_PATH=<repo-root>/anisible/roles \
-ansible-playbook \
-  -K \
-  -i ../terraform/environments/local/generated/hosts.yml \
-  playbooks/site.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
-```
-
-For local runs, `-K` prompts for the sudo password used by `become`, which is required because the playbook installs packages and writes under `/opt`.
-
-To stop the Ansible-managed local deployment and remove its containers and volumes:
-
-```bash
-cd <repo-root>/anisible
-
-ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
-ansible-playbook \
-  -K \
-  -i ../terraform/environments/local/generated/hosts.yml \
-  playbooks/teardown.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
-```
-
-Direct smoke-test runtime:
-
-```bash
-cd deployment/kong
-docker compose up -d
-```
-
-```bash
-cd promethusGrafana
-docker compose up -d
-```
-
-Useful local endpoints:
-
-- Kong Proxy:
-  `http://localhost:8000`
-- Kong Admin API:
-  `http://localhost:8001`
-- Kong Manager UI:
-  `http://localhost:8002`
-- Prometheus:
-  `http://localhost:9090`
-- Grafana:
-  `http://localhost:3000`
+- Application failure and ECS task replacement:
+  stops the current ECS task on purpose, waits for ECS to replace it, and then re-runs the proxy and optional admin checks to confirm service recovery without rebuilding infrastructure.
+  [tests/TP_APPLICATION_FAILURE_RECOVERY_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_APPLICATION_FAILURE_RECOVERY_V001.py),
+  [tests/TP_APPLICATION_FAILURE_RECOVERY_V001.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_APPLICATION_FAILURE_RECOVERY_V001.md)
+- Git-driven upstream misconfiguration and recovery:
+  commits a bad upstream target into the AWS branch, waits for the deployed proxy path to fail, then creates a revert commit and verifies that the deployment recovers after the rollback applies.
+  [tests/TP_MISCONFIGURATION_RECOVERY_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_MISCONFIGURATION_RECOVERY_V001.py),
+  [tests/TP_MISCONFIGURATION_RECOVERY_V001.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_MISCONFIGURATION_RECOVERY_V001.md)
 
 ## Validation Status
 
-Validated locally in this workspace:
+Validated in this workspace:
 
-- Terraform installed locally and `local` and `azure` environments validated
-- Ansible installed locally and linted successfully
-- Kong local stack starts and exposes `/status` and `/metrics`
-- Prometheus scrapes Kong metrics successfully
-- Grafana health is healthy
+- AWS Terraform configuration has been iterated and documented for ECS, EFS, Backup, Secrets Manager, AMP, and AMG
+- Python-based verification scripts were updated to target the AWS deployment shape
 - GitHub Actions workflows were added for Terraform, Ansible, observability smoke tests, and AWS deployment
 
-Known limitation from local validation:
+Known limitation:
 
-- The AWS deployment workflow now creates remote HCP Terraform runs, so successful GitHub execution still depends on valid HCP Terraform workspace configuration and AWS credentials being present in that workspace.
+- End-to-end AWS success still depends on valid HCP Terraform workspace configuration, AWS credentials, and a real deploy target; those runtime dependencies cannot be proven from static repository validation alone.
 
 ## Tradeoffs And Assumptions
 
 Tradeoffs:
 
-- AWS uses ECS/Fargate to avoid host management while Azure remains single-host for now.
-- Docker Compose is used as the runtime packaging format across environments for consistency and speed.
-- Kong runs in DB-less mode for simplicity and reproducibility, rather than full database-backed dynamic configuration.
+- AWS uses ECS/Fargate to avoid host management and keep the branch focused on an AWS-native runtime.
+- The repository still carries host-based and local smoke-test assets, but the deployment path described here is the ECS/Fargate AWS path.
+- Kong runs in DB-backed mode on AWS because the branch now prioritizes persistence, rollback safety, and recovery over the simpler DB-less path.
 - Observability focuses on metrics and logs first, without a full tracing stack.
 
 Assumptions:
 
-- Local development runs on a machine with Docker available.
-- AWS and Azure credentials are supplied externally when using cloud targets.
+- AWS credentials are supplied externally through the standard provider chain or HCP Terraform workspace variables.
 - The current repository names `anisible/` and `promethusGrafana/` are preserved.
 - This repository is assessment-oriented and optimized for clarity and operational intent over production scale.
 
@@ -407,6 +438,6 @@ Assumptions:
 
 Natural extensions if more time were available:
 
-1. Add rollback documentation and a concrete recovery runbook.
-2. Add backup and restore procedures for persistent data.
-3. Harden secrets handling and reduce default open access in cloud examples.
+1. Add a lower-cost local or free-tier demo path that mirrors the AWS operational model more closely.
+2. Add a repeatable scripted chaos/demo harness for the failure playbooks documented in this README.
+3. Harden IAM scope, management endpoint exposure, and secret rotation beyond the current assessment baseline.

@@ -10,9 +10,12 @@ module "kong" {
   subnet_cidr                                 = var.subnet_cidr
   secondary_subnet_cidr                       = var.secondary_subnet_cidr
   kong_image                                  = var.kong_image
+  postgres_image                              = var.postgres_image
   proxy_port                                  = var.proxy_port
   admin_port                                  = var.admin_port
   manager_port                                = var.manager_port
+  publish_admin_api                           = var.publish_admin_api
+  publish_manager_ui                          = var.publish_manager_ui
   desired_count                               = var.desired_count
   min_capacity                                = var.min_capacity
   max_capacity                                = var.max_capacity
@@ -38,5 +41,10 @@ module "kong" {
   enable_grafana_dashboard_bootstrap          = var.enable_grafana_dashboard_bootstrap
   grafana_dashboard_service_account_token_ttl = var.grafana_dashboard_service_account_token_ttl
   grafana_prometheus_datasource_name          = var.grafana_prometheus_datasource_name
+  enable_efs_backups                          = var.enable_efs_backups
+  efs_backup_schedule                         = var.efs_backup_schedule
+  efs_backup_start_window_minutes             = var.efs_backup_start_window_minutes
+  efs_backup_completion_window_minutes        = var.efs_backup_completion_window_minutes
+  efs_backup_delete_after_days                = var.efs_backup_delete_after_days
   tags                                        = var.tags
 }

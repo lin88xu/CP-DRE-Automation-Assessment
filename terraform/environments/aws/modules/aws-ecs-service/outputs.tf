@@ -9,13 +9,13 @@ output "proxy_url" {
 }
 
 output "admin_url" {
-  value       = "http://${aws_lb.this.dns_name}:${var.admin_port}"
-  description = "Kong Admin API URL."
+  value       = var.publish_admin_api ? "http://${aws_lb.this.dns_name}:${var.admin_port}" : null
+  description = "Kong Admin API URL when public access is enabled."
 }
 
 output "manager_url" {
-  value       = "http://${aws_lb.this.dns_name}:${var.manager_port}"
-  description = "Kong Manager URL."
+  value       = var.publish_manager_ui ? "http://${aws_lb.this.dns_name}:${var.manager_port}" : null
+  description = "Kong Manager URL when public access is enabled."
 }
 
 output "ecs_cluster_name" {
@@ -26,6 +26,26 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   value       = aws_ecs_service.this.name
   description = "ECS service name."
+}
+
+output "postgres_efs_file_system_id" {
+  value       = aws_efs_file_system.kong_postgres.id
+  description = "EFS file system ID used for PostgreSQL data persistence."
+}
+
+output "postgres_efs_access_point_id" {
+  value       = aws_efs_access_point.kong_postgres.id
+  description = "EFS access point ID used by the ECS task for PostgreSQL data."
+}
+
+output "efs_backup_vault_name" {
+  value       = var.enable_efs_backups ? aws_backup_vault.kong_postgres[0].name : null
+  description = "AWS Backup vault name used for the Kong PostgreSQL EFS file system."
+}
+
+output "efs_backup_plan_id" {
+  value       = var.enable_efs_backups ? aws_backup_plan.kong_postgres[0].id : null
+  description = "AWS Backup plan ID used for the Kong PostgreSQL EFS file system."
 }
 
 output "amp_workspace_id" {
@@ -43,9 +63,9 @@ output "amp_prometheus_endpoint" {
   description = "Base query endpoint of the Amazon Managed Service for Prometheus workspace."
 }
 
-output "amp_remote_write_url" {
+output "amp_remote_write_endpoint" {
   value       = var.enable_managed_observability ? "${aws_prometheus_workspace.this[0].prometheus_endpoint}api/v1/remote_write" : null
-  description = "Remote write URL used by the ECS Prometheus sidecar."
+  description = "Remote write endpoint used by the ECS Prometheus collector sidecar."
 }
 
 output "grafana_workspace_id" {

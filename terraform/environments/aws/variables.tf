@@ -18,8 +18,8 @@ variable "name_prefix" {
 
 variable "admin_cidr" {
   type        = string
-  description = "CIDR allowed to reach the Kong load balancer ports."
-  default     = "0.0.0.0/0"
+  description = "CIDR allowed to reach published management ports when they are enabled."
+  default     = "203.0.113.10/32"
 }
 
 variable "vpc_cidr" {
@@ -46,6 +46,12 @@ variable "kong_image" {
   default     = "kong:latest"
 }
 
+variable "postgres_image" {
+  type        = string
+  description = "PostgreSQL container image used for the task-local Kong database."
+  default     = "postgres:15-alpine"
+}
+
 variable "proxy_port" {
   type        = number
   description = "Public port mapped to the Kong proxy."
@@ -64,6 +70,18 @@ variable "manager_port" {
   default     = 8002
 }
 
+variable "publish_admin_api" {
+  type        = bool
+  description = "Whether to publish the Kong Admin API through the ALB."
+  default     = false
+}
+
+variable "publish_manager_ui" {
+  type        = bool
+  description = "Whether to publish the Kong Manager UI through the ALB."
+  default     = false
+}
+
 variable "desired_count" {
   type        = number
   description = "Desired ECS task count."
@@ -78,8 +96,8 @@ variable "min_capacity" {
 
 variable "max_capacity" {
   type        = number
-  description = "Maximum number of ECS tasks allowed by autoscaling."
-  default     = 4
+  description = "Maximum number of ECS tasks allowed by autoscaling. Keep this at 1 while Kong uses task-local PostgreSQL persisted on EFS."
+  default     = 1
 }
 
 variable "task_cpu" {
@@ -212,6 +230,36 @@ variable "grafana_prometheus_datasource_name" {
   type        = string
   description = "Datasource name created in Amazon Managed Grafana for querying the AMP workspace."
   default     = "Amazon Managed Service for Prometheus"
+}
+
+variable "enable_efs_backups" {
+  type        = bool
+  description = "Whether to protect the Kong PostgreSQL EFS file system with AWS Backup."
+  default     = true
+}
+
+variable "efs_backup_schedule" {
+  type        = string
+  description = "AWS Backup cron expression for the Kong PostgreSQL EFS backups."
+  default     = "cron(0 5 ? * * *)"
+}
+
+variable "efs_backup_start_window_minutes" {
+  type        = number
+  description = "AWS Backup start window, in minutes, for the Kong PostgreSQL EFS backups."
+  default     = 60
+}
+
+variable "efs_backup_completion_window_minutes" {
+  type        = number
+  description = "AWS Backup completion window, in minutes, for the Kong PostgreSQL EFS backups."
+  default     = 180
+}
+
+variable "efs_backup_delete_after_days" {
+  type        = number
+  description = "Number of days to retain Kong PostgreSQL EFS backups in AWS Backup."
+  default     = 35
 }
 
 variable "tags" {
