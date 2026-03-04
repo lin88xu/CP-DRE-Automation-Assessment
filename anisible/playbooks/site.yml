@@ -1,13 +1,111 @@
 - name: Configure Kong assessment host
   hosts: kong_hosts
   become: true
-  roles:
-    - role: docker
+  vars:
+    effective_deployment_runtime: "{{ 'local' if ansible_connection == 'local' and deployment_runtime == 'docker_compose' else deployment_runtime }}"
+  tasks:
+    - name: Ensure Docker is available for local runtime
+      ansible.builtin.import_role:
+        name: docker
+      when: effective_deployment_runtime in ["local", "minikube"]
       tags:
         - docker
-    - role: kong
+
+    - name: Resolve local runtime execution user
+      ansible.builtin.set_fact:
+        minikube_exec_user: "{{ lookup('env', 'SUDO_USER') | default(lookup('env', 'USER'), true) }}"
+      when: effective_deployment_runtime in ["local", "minikube"]
+
+    - name: Resolve local runtime execution user home
+      ansible.builtin.command: getent passwd "{{ minikube_exec_user }}"
+      register: minikube_exec_passwd
+      changed_when: false
+      when: effective_deployment_runtime in ["local", "minikube"]
+
+    - name: Set local runtime execution facts
+      ansible.builtin.set_fact:
+        minikube_exec_home: "{{ minikube_exec_passwd.stdout.split(':')[5] }}"
+        minikube_exec_kubeconfig: "{{ minikube_exec_passwd.stdout.split(':')[5] }}/.kube/config"
+      when: effective_deployment_runtime in ["local", "minikube"]
+
+    - name: Deploy autoscaled Kong stack with local runtime
+      ansible.builtin.import_role:
+        name: minikube
+      when: effective_deployment_runtime in ["local", "minikube"]
       tags:
+        - local
         - kong
-    - role: observability
-      tags:
-        - observability
+
+    - name: Resolve local runtime cluster IP
+      ansible.builtin.command: minikube ip -p "{{ minikube_profile }}"
+      register: minikube_ip
+      changed_when: false
+      failed_when: false
+      when: effective_deployment_runtime in ["local", "minikube"]
+      become: true
+      become_user: "{{ minikube_exec_user }}"
+      environment:
+        HOME: "{{ minikube_exec_home }}"
+        KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+        CHANGE_MINIKUBE_NONE_USER: "true"
+
+    - name: Set local runtime access facts
+      ansible.builtin.set_fact:
+        local_runtime_public_host: >-
+          {{
+            (minikube_ip.stdout | trim)
+            if (minikube_ip.rc | default(1)) == 0
+            else minikube_public_host
+          }}
+        local_runtime_browser_host: >-
+          {{
+            (minikube_ip.stdout | trim)
+            if (minikube_ip.rc | default(1)) == 0
+            else minikube_profile
+          }}
+      when: effective_deployment_runtime in ["local", "minikube"]
+
+    - name: Print local runtime access URLs
+      ansible.builtin.debug:
+        msg:
+          - >-
+            proxy_url=http://{{ local_runtime_public_host }}:{{ minikube_kong_proxy_nodeport }}
+          - >-
+            admin_url=http://{{ local_runtime_public_host }}:{{ minikube_kong_admin_nodeport }}
+          - >-
+            manager_url=http://{{ local_runtime_public_host }}:{{ minikube_kong_manager_nodeport }}
+          - >-
+            prometheus_url=http://{{ local_runtime_public_host }}:{{ minikube_prometheus_nodeport }}
+          - >-
+            grafana_url=http://{{ local_runtime_public_host }}:{{ minikube_grafana_nodeport }}
+          - "grafana_login={{ observability_grafana_admin_user }}/{{ observability_grafana_admin_password }}"
+      when:
+        - effective_deployment_runtime in ["local", "minikube"]
+        - not (ansible_connection == "local" and minikube_driver == "docker")
+
+    - name: Print local runtime localhost access instructions
+      ansible.builtin.debug:
+        msg:
+          - >-
+            The local runtime uses Minikube with the docker driver, so
+            {{ local_runtime_browser_host }} is not directly reachable from your browser.
+          - "Use localhost tunnels instead:"
+          - "grafana_tunnel=minikube service grafana -n {{ minikube_namespace }} --url -p {{ minikube_profile }}"
+          - "prometheus_tunnel=minikube service prometheus -n {{ minikube_namespace }} --url -p {{ minikube_profile }}"
+          - "kong_tunnel=minikube service kong -n {{ minikube_namespace }} --url -p {{ minikube_profile }}"
+          - "Or use fixed localhost port-forwards:"
+          - "grafana_port_forward=kubectl -n {{ minikube_namespace }} port-forward svc/grafana 3000:3000"
+          - "prometheus_port_forward=kubectl -n {{ minikube_namespace }} port-forward svc/prometheus 9090:9090"
+          - >-
+            kong_port_forward=kubectl -n {{ minikube_namespace }}
+            port-forward svc/kong 8000:8000 8001:8001 8002:8002
+          - "grafana_url=http://127.0.0.1:3000"
+          - "prometheus_url=http://127.0.0.1:9090"
+          - "proxy_url=http://127.0.0.1:8000"
+          - "admin_url=http://127.0.0.1:8001"
+          - "manager_url=http://127.0.0.1:8002"
+          - "grafana_login={{ observability_grafana_admin_user }}/{{ observability_grafana_admin_password }}"
+      when:
+        - effective_deployment_runtime in ["local", "minikube"]
+        - ansible_connection == "local"
+        - minikube_driver == "docker"

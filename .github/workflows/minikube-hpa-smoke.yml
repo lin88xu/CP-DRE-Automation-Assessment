@@ -1,0 +1,173 @@
+name: Minikube HPA Smoke
+
+on:
+  push:
+    paths:
+      - ".github/workflows/minikube-hpa-smoke.yml"
+      - "anisible/**"
+      - "minikube/**"
+      - "terraform/environments/local/**"
+      - "local-runtime.sh"
+      - "tests/TP_LOCAL_STACK_VERIFICATION_V001.py"
+      - "tests/TP_HPA_SCALING_UNDER_LOAD_V001.py"
+      - "tests/TP_LOCAL_STACK_VERIFICATION_V001.md"
+      - "tests/TP_HPA_SCALING_UNDER_LOAD_V001.md"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/minikube-hpa-smoke.yml"
+      - "anisible/**"
+      - "minikube/**"
+      - "terraform/environments/local/**"
+      - "local-runtime.sh"
+      - "tests/TP_LOCAL_STACK_VERIFICATION_V001.py"
+      - "tests/TP_HPA_SCALING_UNDER_LOAD_V001.py"
+      - "tests/TP_LOCAL_STACK_VERIFICATION_V001.md"
+      - "tests/TP_HPA_SCALING_UNDER_LOAD_V001.md"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Minikube HPA Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Create artifact directory
+        run: mkdir -p ci-artifacts/minikube-hpa
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: anisible/requirements.txt
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install Ansible tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r anisible/requirements.txt
+
+      - name: Record host prerequisites
+        run: |
+          docker info > ci-artifacts/minikube-hpa/docker-info.log
+          python3 --version > ci-artifacts/minikube-hpa/python-version.log
+          terraform version > ci-artifacts/minikube-hpa/terraform-version.log
+          ansible-playbook --version > ci-artifacts/minikube-hpa/ansible-version.log
+
+      - name: Deploy local Minikube runtime
+        id: deploy_local_runtime
+        env:
+          MINIKUBE_CPUS: "2"
+          MINIKUBE_MEMORY_MB: "4096"
+          MINIKUBE_HTTPBIN_ROLLOUT_TIMEOUT: "240s"
+          MINIKUBE_KONG_ROLLOUT_TIMEOUT: "300s"
+          MINIKUBE_PROMETHEUS_ROLLOUT_TIMEOUT: "240s"
+          MINIKUBE_GRAFANA_ROLLOUT_TIMEOUT: "240s"
+        run: |
+          set -o pipefail
+          bash ./local-runtime.sh up --no-ask-become-pass 2>&1 | tee ci-artifacts/minikube-hpa/local-runtime-up.log
+
+      - name: Tune HPA thresholds for CI smoke
+        id: tune_hpa
+        run: |
+          kubectl -n kong get hpa kong -o yaml > ci-artifacts/minikube-hpa/kong-hpa-before.yaml
+          kubectl -n kong patch hpa kong --type merge -p '{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":5}}},{"type":"Resource","resource":{"name":"memory","target":{"type":"Utilization","averageUtilization":35}}}]}}'
+          kubectl -n kong get hpa kong -o yaml > ci-artifacts/minikube-hpa/kong-hpa-after.yaml
+
+      - name: Run local stack verification
+        id: local_stack_verification
+        run: |
+          set -o pipefail
+          python3 tests/TP_LOCAL_STACK_VERIFICATION_V001.py 2>&1 | tee ci-artifacts/minikube-hpa/local-stack-verification.log
+
+      - name: Run HPA smoke test
+        id: hpa_smoke
+        env:
+          LOAD_CONCURRENCY: "80"
+          LOAD_DURATION_SECONDS: "120"
+          HPA_SCALE_UP_TIMEOUT_SECONDS: "180"
+          HPA_POLL_INTERVAL_SECONDS: "5"
+          LOAD_PATH: "/get"
+        run: |
+          set -o pipefail
+          python3 -u tests/TP_HPA_SCALING_UNDER_LOAD_V001.py 2>&1 | tee ci-artifacts/minikube-hpa/hpa-smoke.log
+
+      - name: Record Kubernetes state
+        if: always()
+        run: |
+          kubectl -n kong get hpa,pods,deploy,svc -o wide > ci-artifacts/minikube-hpa/kubectl-get.log || true
+          kubectl -n kong describe hpa kong > ci-artifacts/minikube-hpa/kong-hpa-describe.log || true
+          kubectl -n kong top pods > ci-artifacts/minikube-hpa/kubectl-top-pods.log || true
+          kubectl -n kong get events --sort-by=.lastTimestamp > ci-artifacts/minikube-hpa/kubectl-events.log || true
+
+      - name: Record workload logs
+        if: always()
+        run: |
+          kubectl -n kong logs deploy/kong --tail=500 > ci-artifacts/minikube-hpa/kong.log || true
+          kubectl -n kong logs deploy/prometheus --tail=500 > ci-artifacts/minikube-hpa/prometheus.log || true
+          kubectl -n kong logs deploy/grafana --tail=500 > ci-artifacts/minikube-hpa/grafana.log || true
+          minikube status -p kong-assessment > ci-artifacts/minikube-hpa/minikube-status.log || true
+          minikube logs -p kong-assessment > ci-artifacts/minikube-hpa/minikube.log || true
+
+      - name: Tear down local Minikube runtime
+        if: always()
+        id: teardown_local_runtime
+        run: |
+          set -o pipefail
+          bash ./local-runtime.sh down --no-ask-become-pass 2>&1 | tee ci-artifacts/minikube-hpa/local-runtime-down.log
+
+      - name: Write smoke test summary
+        if: always()
+        env:
+          DEPLOY_LOCAL_RUNTIME: ${{ steps.deploy_local_runtime.conclusion }}
+          TUNE_HPA: ${{ steps.tune_hpa.conclusion }}
+          LOCAL_STACK_VERIFICATION: ${{ steps.local_stack_verification.conclusion }}
+          HPA_SMOKE: ${{ steps.hpa_smoke.conclusion }}
+          TEARDOWN_LOCAL_RUNTIME: ${{ steps.teardown_local_runtime.conclusion }}
+        run: |
+          status_text() {
+            if [ "$1" = "success" ]; then
+              printf 'PASS'
+            elif [ "$1" = "skipped" ] || [ -z "$1" ]; then
+              printf 'SKIP'
+            else
+              printf 'FAIL'
+            fi
+          }
+
+          {
+            echo "## Minikube HPA Smoke Summary"
+            echo
+            echo "| Check | Status |"
+            echo "| --- | --- |"
+            echo "| Local Minikube deploy | $(status_text "$DEPLOY_LOCAL_RUNTIME") |"
+            echo "| CI HPA threshold tuning | $(status_text "$TUNE_HPA") |"
+            echo "| Local stack verification | $(status_text "$LOCAL_STACK_VERIFICATION") |"
+            echo "| HPA scale-up smoke test | $(status_text "$HPA_SMOKE") |"
+            echo "| Local Minikube teardown | $(status_text "$TEARDOWN_LOCAL_RUNTIME") |"
+            echo
+            echo "Note: this smoke workflow temporarily lowers the Kong HPA CPU and memory utilization targets in CI so scale-up can be observed within runner time limits."
+            echo
+            echo "Artifacts: \`minikube-hpa-smoke-logs\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload smoke test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minikube-hpa-smoke-logs
+          path: ci-artifacts/minikube-hpa
+          if-no-files-found: error

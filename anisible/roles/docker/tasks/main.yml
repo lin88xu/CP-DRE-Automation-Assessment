@@ -52,9 +52,19 @@
   ansible.builtin.command: docker info
   changed_when: false
 
+- name: Resolve Docker access user for local runs
+  ansible.builtin.set_fact:
+    docker_access_user: "{{ lookup('env', 'SUDO_USER') | default(lookup('env', 'USER'), true) }}"
+  when: ansible_connection == "local"
+
+- name: Resolve Docker access user for remote runs
+  ansible.builtin.set_fact:
+    docker_access_user: "{{ ansible_user | default(ansible_user_id) }}"
+  when: ansible_connection != "local"
+
 - name: Ensure remote user can access Docker
   ansible.builtin.user:
-    name: "{{ ansible_user | default(ansible_user_id) }}"
+    name: "{{ docker_access_user }}"
     groups: docker
     append: true
-  when: (ansible_user | default(ansible_user_id)) != "root"
+  when: docker_access_user != "root"

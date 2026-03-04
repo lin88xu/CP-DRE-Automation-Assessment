@@ -160,6 +160,60 @@ variable "observability_scrape_interval" {
   default     = "10s"
 }
 
+variable "grafana_admin_user_ids" {
+  type        = list(string)
+  description = "IAM Identity Center user IDs to assign the Admin role in the Amazon Managed Grafana workspace."
+  default     = []
+}
+
+variable "grafana_editor_user_ids" {
+  type        = list(string)
+  description = "IAM Identity Center user IDs to assign the Editor role in the Amazon Managed Grafana workspace."
+  default     = []
+}
+
+variable "grafana_viewer_user_ids" {
+  type        = list(string)
+  description = "IAM Identity Center user IDs to assign the Viewer role in the Amazon Managed Grafana workspace."
+  default     = []
+}
+
+variable "grafana_admin_group_ids" {
+  type        = list(string)
+  description = "IAM Identity Center group IDs to assign the Admin role in the Amazon Managed Grafana workspace."
+  default     = []
+}
+
+variable "grafana_editor_group_ids" {
+  type        = list(string)
+  description = "IAM Identity Center group IDs to assign the Editor role in the Amazon Managed Grafana workspace."
+  default     = []
+}
+
+variable "grafana_viewer_group_ids" {
+  type        = list(string)
+  description = "IAM Identity Center group IDs to assign the Viewer role in the Amazon Managed Grafana workspace."
+  default     = []
+}
+
+variable "enable_grafana_dashboard_bootstrap" {
+  type        = bool
+  description = "Whether Terraform should create the AMP data source and import the official Kong dashboard into Amazon Managed Grafana."
+  default     = true
+}
+
+variable "grafana_dashboard_service_account_token_ttl" {
+  type        = number
+  description = "Lifetime in seconds for the temporary AMG service account token used to bootstrap the dashboard and data source."
+  default     = 14400
+}
+
+variable "grafana_prometheus_datasource_name" {
+  type        = string
+  description = "Datasource name created in Amazon Managed Grafana for querying the AMP workspace."
+  default     = "Amazon Managed Service for Prometheus"
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags applied to AWS resources."

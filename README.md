@@ -4,7 +4,7 @@ This repository packages Kong Gateway as the application under assessment and wr
 
 The same deployment model is intended to work across:
 
-- Local Docker
+- Local
 - AWS
 - Azure
 
@@ -13,7 +13,7 @@ The same deployment model is intended to work across:
 Before running the local deployment flow yourself, make sure these are installed on the machine where you will run Terraform and Ansible:
 
 - `git`
-- `docker` with `docker compose` available
+- `docker`
 - `terraform`
 - `python3`
 - `pip`
@@ -30,7 +30,6 @@ Useful preflight checks:
 
 ```bash
 docker version
-docker compose version
 terraform version
 ansible-playbook --version
 python3 --version
@@ -45,7 +44,7 @@ The solution is organized as a layered delivery model:
 3. Kong runs as the API gateway and management plane.
 4. Prometheus scrapes Kong metrics.
 5. Grafana visualizes service health and request behavior.
-6. GitHub Actions validates Terraform, lints Ansible, and smoke-tests the observability path.
+6. GitHub Actions validates Terraform, lints Ansible, smoke-tests the observability path, and exercises the Minikube HPA path under load.
 
 High-level flow:
 
@@ -56,6 +55,7 @@ Git Push / Pull Request
 GitHub Actions
   - Terraform validate
   - Ansible lint
+  - Minikube HPA smoke test
   - Observability smoke test
         |
         v
@@ -67,7 +67,7 @@ Terraform
         v
 Deployment Layer
   - AWS: ECS task definition + ALB
-  - Local: Terraform handoff -> Ansible + Docker Compose
+  - Local: Terraform handoff -> Ansible + Minikube + HPA
   - Azure: Ansible + Docker Compose
         |
         v
@@ -78,6 +78,8 @@ Kong Gateway
         |
         v
 Prometheus -> Grafana
+  - Prometheus: 9090
+  - Grafana: 3000
 ```
 
 ## Repository Layout
@@ -87,7 +89,7 @@ Prometheus -> Grafana
 ├── README.md
 ├── .github/workflows/
 │   ├── ansible-ci.yml
-│   ├── local-deployment-e2e.yml
+│   ├── minikube-hpa-smoke.yml
 │   ├── observability-smoke.yml
 │   └── terraform-ci.yml
 ├── terraform/
@@ -105,6 +107,8 @@ Prometheus -> Grafana
 │   └── kong/
 │       ├── docker-compose.yml
 │       └── docker-kong.yml
+├── minikube/
+│   └── manifests/
 ├── promethusGrafana/
 │   ├── prometheus/
 │   └── grafana/
@@ -124,7 +128,7 @@ This repository contains the required deliverables from the assessment brief:
 - CI/CD pipeline configuration:
   [.github/workflows/terraform-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/terraform-ci.yml),
   [.github/workflows/ansible-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/ansible-ci.yml),
-  [.github/workflows/local-deployment-e2e.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/local-deployment-e2e.yml),
+  [.github/workflows/minikube-hpa-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/minikube-hpa-smoke.yml),
   [.github/workflows/observability-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/observability-smoke.yml)
 - Application and automation code:
   [deployment/kong/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/deployment/kong),
@@ -170,47 +174,49 @@ Design intent:
 Ansible provides the configuration-management layer:
 
 - Installs or validates Docker on the target host
-- Renders Kong Compose and declarative config
-- Renders Prometheus and Grafana config
-- Starts both stacks with Docker Compose
+- Installs Minikube and `kubectl` for the local runtime
+- Applies Kubernetes manifests for Kong, the sample upstream service, and a HorizontalPodAutoscaler
 
 Scope note:
 
 - Ansible is the deployment layer for the local and Azure host-based paths.
-- The local path uses Terraform to generate the Ansible inventory and variables handoff before Ansible deploys Kong and observability.
+- The local path uses Terraform to generate the Ansible inventory and variables handoff before Ansible deploys the Minikube-backed local stack.
 - The AWS target is container-native and packages Kong directly into ECS/Fargate with Terraform.
 
 Key files:
 
 - [anisible/playbooks/site.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/playbooks/site.yml)
 - [anisible/roles/kong/tasks/main.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/roles/kong/tasks/main.yml)
+- [anisible/roles/minikube/tasks/main.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/roles/minikube/tasks/main.yml)
 - [anisible/roles/observability/tasks/main.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/roles/observability/tasks/main.yml)
 - [anisible/playbooks/group_vars/all.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible/playbooks/group_vars/all.yml)
+- [minikube/README.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/minikube/README.md)
 
 ## CI/CD And GitOps Flow
 
-The GitHub Actions workflows implement the validation side of the GitOps path:
+The current GitHub Actions workflows on this branch cover validation and local smoke testing:
 
 - Terraform validation:
   [.github/workflows/terraform-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/terraform-ci.yml)
 - Ansible lint and syntax check:
   [.github/workflows/ansible-ci.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/ansible-ci.yml)
-- Local host-based deployment validation:
-  [.github/workflows/local-deployment-e2e.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/local-deployment-e2e.yml)
+- Minikube smoke test for the HPA path:
+  [.github/workflows/minikube-hpa-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/minikube-hpa-smoke.yml)
 - Kong and observability smoke test:
   [.github/workflows/observability-smoke.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/.github/workflows/observability-smoke.yml)
 
 Current pipeline stages demonstrated:
 
-- Validate Terraform formatting and configuration
-- Validate Ansible playbooks and roles
-- Run Terraform `init`, `validate`, `plan`, and apply the local handoff layer
-- Run the local Ansible deployment layer on `localhost` using Terraform-generated inventory and variables
-- Verify Kong serves proxy and Admin traffic after deployment
-- Boot Kong locally in CI
+- Validate Terraform formatting, `init -backend=false`, and `validate` across `local`, `aws`, and `azure`
+- Validate Ansible playbooks with `ansible-playbook --syntax-check` and `ansible-lint`
+- Validate the Kong and observability Docker Compose definitions
+- Deploy the local Minikube runtime in CI
+- Run the local post-deployment verification script
+- Verify provisioned Grafana dashboard content beyond basic service health
+- Exercise the Kong HPA path under load with a dedicated Minikube smoke workflow
+- Boot Kong locally in CI and verify `/status` and `/metrics`
 - Boot Prometheus and Grafana locally in CI
-- Verify Grafana health
-- Verify Prometheus can scrape Kong metrics
+- Verify Grafana health and Prometheus scrape health for `kong-admin`
 - Upload logs and summaries as workflow artifacts
 
 Safe change practices included:
@@ -251,13 +257,25 @@ Relevant files:
 - [promethusGrafana/prometheus/prometheus.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana/prometheus/prometheus.yml)
 - [promethusGrafana/prometheus/rules/kong-alerts.yml](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana/prometheus/rules/kong-alerts.yml)
 - [kong-official.json](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/kong/kong/plugins/prometheus/grafana/kong-official.json)
+- [TP_LOCAL_STACK_VERIFICATION_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_LOCAL_STACK_VERIFICATION_V001.py)
+- [TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py)
+- [TP_DASHBOARD_CONTENT_CORRECTNESS_V001.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.md)
+
+Verification assets:
+
+- `python3 tests/TP_LOCAL_STACK_VERIFICATION_V001.py`
+  Validates Kong Admin, Kong Proxy, Prometheus, and Grafana health on the local stack.
+- `python3 tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py`
+  Validates the provisioned Grafana Prometheus datasource and the live `Kong (official)` dashboard content.
+- `python3 -u tests/TP_HPA_SCALING_UNDER_LOAD_V001.py`
+  Drives load through Kong and checks that the HPA scales above baseline.
 
 Operator investigation path:
 
 1. Check Grafana dashboard health and request rate.
 2. Check Prometheus target status for `kong-admin`.
 3. Query Kong `/status` and `/metrics`.
-4. Inspect container logs with Docker Compose.
+4. Inspect runtime logs from Docker Compose or `kubectl logs` if the Minikube runtime is in use.
 
 ## Resiliency Design
 
@@ -290,76 +308,45 @@ Failure scenarios covered by the design:
 Terraform handoff plus Ansible deployment:
 
 ```bash
-cd terraform/environments/local
-terraform init
-terraform apply
+cd <repo-root>
+
+./local-runtime.sh
 ```
+
+The script wraps the local Terraform handoff and the Ansible playbooks into a
+single entrypoint. It deploys the Minikube-backed local runtime, handles the
+localhost port-forwards, and supports:
 
 ```bash
-cd <repo-root>/anisible
-
-ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
-ansible-playbook \
-  -K \
-  -i ../terraform/environments/local/generated/hosts.yml \
-  playbooks/site.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+./local-runtime.sh toggle
+./local-runtime.sh up
+./local-runtime.sh down
+./local-runtime.sh status
 ```
 
-Replace `<repo-root>` with the directory where you cloned this repository. For example, that might be `/home/<user>/CP-DRE-Automation-Assessment` on Linux, or `/mnt/c/.../CP-DRE-Automation-Assessment` under WSL if the repo lives on a Windows-mounted drive.
+`toggle` turns the local runtime off when it is already active, and starts it when it is not.
 
-If you run the repository from WSL under `/mnt/c/...`, Ansible treats that path as world-writable and ignores the local `ansible.cfg` unless `ANSIBLE_CONFIG` is set explicitly. If you prefer not to rely on `ansible.cfg`, use:
+For local runs, `./local-runtime.sh up` prompts for the sudo password used by
+Ansible `become`, which is required because the playbook installs packages and
+writes under `/opt`.
 
-```bash
-cd <repo-root>/anisible
+The local runtime installs a local Kubernetes cluster, deploys Kong and `httpbin`,
+and creates a HorizontalPodAutoscaler backed by the Minikube `metrics-server` addon.
 
-ANSIBLE_ROLES_PATH=<repo-root>/anisible/roles \
-ansible-playbook \
-  -K \
-  -i ../terraform/environments/local/generated/hosts.yml \
-  playbooks/site.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
-```
+On local Linux/WSL with the Minikube `docker` driver, the reported node
+IP is on Docker's internal network and is not directly reachable from your
+browser. `./local-runtime.sh up` starts the needed localhost port-forwards
+automatically, which map the local runtime to:
 
-For local runs, `-K` prompts for the sudo password used by `become`, which is required because the playbook installs packages and writes under `/opt`.
+- Grafana: `http://127.0.0.1:3000`
+- Prometheus: `http://127.0.0.1:9090`
+- Kong Proxy: `http://127.0.0.1:8000`
+- Kong Admin API: `http://127.0.0.1:8001`
+- Kong Manager UI: `http://127.0.0.1:8002`
 
-To stop the Ansible-managed local deployment and remove its containers and volumes:
-
-```bash
-cd <repo-root>/anisible
-
-ANSIBLE_CONFIG=<repo-root>/anisible/ansible.cfg \
-ansible-playbook \
-  -K \
-  -i ../terraform/environments/local/generated/hosts.yml \
-  playbooks/teardown.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
-```
-
-Direct smoke-test runtime:
-
-```bash
-cd deployment/kong
-docker compose up -d
-```
-
-```bash
-cd promethusGrafana
-docker compose up -d
-```
-
-Useful local endpoints:
-
-- Kong Proxy:
-  `http://localhost:8000`
-- Kong Admin API:
-  `http://localhost:8001`
-- Kong Manager UI:
-  `http://localhost:8002`
-- Prometheus:
-  `http://localhost:9090`
-- Grafana:
-  `http://localhost:3000`
+If you deploy through `./local-runtime.sh up`, those localhost
+port-forwards are started automatically and cleaned up by
+`./local-runtime.sh down`.
 
 ## Validation Status
 
@@ -370,18 +357,20 @@ Validated locally in this workspace:
 - Kong local stack starts and exposes `/status` and `/metrics`
 - Prometheus scrapes Kong metrics successfully
 - Grafana health is healthy
-- GitHub Actions workflows were added for Terraform, Ansible, and observability smoke tests
+- Grafana dashboard content verification passes against the provisioned `Kong (official)` dashboard
+- GitHub Actions workflows are present for Terraform, Ansible, observability smoke tests, and Minikube HPA smoke testing
+- The local Ansible playbooks now target a single Minikube-backed local runtime
 
 Known limitation from local validation:
 
-- `terraform validate` for the AWS environment did not complete successfully on this machine because the AWS provider plugin stopped responding during local validation. The HCL initializes, but provider-side validation needs separate follow-up on this host.
+- Live AWS and Azure plans still require real cloud credentials and environment-specific inputs outside this repository.
 
 ## Tradeoffs And Assumptions
 
 Tradeoffs:
 
 - AWS uses ECS/Fargate to avoid host management while Azure remains single-host for now.
-- Docker Compose is used as the runtime packaging format across environments for consistency and speed.
+- Docker Compose is still used for the Azure host-based path for consistency and speed.
 - Kong runs in DB-less mode for simplicity and reproducibility, rather than full database-backed dynamic configuration.
 - Observability focuses on metrics and logs first, without a full tracing stack.
 
@@ -396,8 +385,7 @@ Assumptions:
 
 Natural extensions if more time were available:
 
-1. Resolve the local AWS provider validation failure and add provider-level plan tests.
-2. Add deployment workflows beyond validation-only CI.
-3. Add rollback documentation and a concrete recovery runbook.
-4. Add backup and restore procedures for persistent data.
-5. Harden secrets handling and reduce default open access in cloud examples.
+1. Add cloud deployment workflows for Azure plans and applies.
+2. Add rollback documentation and a concrete recovery runbook.
+3. Add backup and restore procedures for persistent data.
+4. Harden secrets handling and reduce default open access in cloud examples.

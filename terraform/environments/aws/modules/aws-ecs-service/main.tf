@@ -51,6 +51,50 @@ locals {
     observability_kong_job_name = var.observability_kong_job_name
   })
   amp_remote_write_endpoint = var.enable_managed_observability ? "${aws_prometheus_workspace.this[0].prometheus_endpoint}api/v1/remote_write" : null
+  grafana_role_assignments = {
+    admin = {
+      role      = "ADMIN"
+      user_ids  = var.grafana_admin_user_ids
+      group_ids = var.grafana_admin_group_ids
+    }
+    editor = {
+      role      = "EDITOR"
+      user_ids  = var.grafana_editor_user_ids
+      group_ids = var.grafana_editor_group_ids
+    }
+    viewer = {
+      role      = "VIEWER"
+      user_ids  = var.grafana_viewer_user_ids
+      group_ids = var.grafana_viewer_group_ids
+    }
+  }
+  grafana_role_assignments_enabled = var.enable_managed_observability ? {
+    for name, assignment in local.grafana_role_assignments :
+    name => assignment
+    if length(assignment.user_ids) > 0 || length(assignment.group_ids) > 0
+  } : {}
+  grafana_all_user_ids = concat(
+    var.grafana_admin_user_ids,
+    var.grafana_editor_user_ids,
+    var.grafana_viewer_user_ids,
+  )
+  grafana_all_group_ids = concat(
+    var.grafana_admin_group_ids,
+    var.grafana_editor_group_ids,
+    var.grafana_viewer_group_ids,
+  )
+  grafana_user_role_overlap = distinct([
+    for id in local.grafana_all_user_ids :
+    id
+    if length([for candidate in local.grafana_all_user_ids : candidate if candidate == id]) > 1
+  ])
+  grafana_group_role_overlap = distinct([
+    for id in local.grafana_all_group_ids :
+    id
+    if length([for candidate in local.grafana_all_group_ids : candidate if candidate == id]) > 1
+  ])
+  grafana_bootstrap_enabled        = var.enable_managed_observability && var.enable_grafana_dashboard_bootstrap
+  grafana_bootstrap_dashboard_path = "${path.module}/../../templates/kong-official.json"
   common_tags = merge(var.tags, {
     ManagedBy = "Terraform"
   })
@@ -505,6 +549,76 @@ resource "aws_grafana_workspace" "this" {
   })
 
   depends_on = [aws_iam_role_policy_attachment.grafana_amp_query]
+
+  lifecycle {
+    precondition {
+      condition     = length(local.grafana_user_role_overlap) == 0
+      error_message = "Each Grafana user ID can only be assigned to one AMG role. Remove duplicates across admin/editor/viewer user lists."
+    }
+
+    precondition {
+      condition     = length(local.grafana_group_role_overlap) == 0
+      error_message = "Each Grafana group ID can only be assigned to one AMG role. Remove duplicates across admin/editor/viewer group lists."
+    }
+  }
+}
+
+resource "aws_grafana_role_association" "roles" {
+  for_each = local.grafana_role_assignments_enabled
+
+  workspace_id = aws_grafana_workspace.this[0].id
+  role         = each.value.role
+  user_ids     = each.value.user_ids
+  group_ids    = each.value.group_ids
+}
+
+resource "aws_grafana_workspace_service_account" "dashboard_bootstrap" {
+  count = local.grafana_bootstrap_enabled ? 1 : 0
+
+  workspace_id = aws_grafana_workspace.this[0].id
+  name         = "${var.name_prefix}-dashboard-bootstrap"
+  grafana_role = "ADMIN"
+}
+
+resource "aws_grafana_workspace_service_account_token" "dashboard_bootstrap" {
+  count = local.grafana_bootstrap_enabled ? 1 : 0
+
+  workspace_id       = aws_grafana_workspace.this[0].id
+  service_account_id = aws_grafana_workspace_service_account.dashboard_bootstrap[0].service_account_id
+  name               = "${var.name_prefix}-dashboard-bootstrap-token"
+  seconds_to_live    = var.grafana_dashboard_service_account_token_ttl
+}
+
+resource "terraform_data" "grafana_dashboard_bootstrap" {
+  count = local.grafana_bootstrap_enabled ? 1 : 0
+
+  triggers_replace = [
+    filesha256(local.grafana_bootstrap_dashboard_path),
+    aws_grafana_workspace.this[0].endpoint,
+    aws_grafana_workspace_service_account_token.dashboard_bootstrap[0].service_account_token_id,
+    aws_prometheus_workspace.this[0].prometheus_endpoint,
+    var.grafana_prometheus_datasource_name,
+    data.aws_region.current.name,
+  ]
+
+  provisioner "local-exec" {
+    command     = "${path.module}/../../scripts/import_amg_dashboard.py"
+    interpreter = ["/usr/bin/env", "python3"]
+
+    environment = {
+      AMG_URL         = aws_grafana_workspace.this[0].endpoint
+      AMG_TOKEN       = aws_grafana_workspace_service_account_token.dashboard_bootstrap[0].key
+      AMP_QUERY_URL   = aws_prometheus_workspace.this[0].prometheus_endpoint
+      AWS_REGION      = data.aws_region.current.name
+      DASHBOARD_JSON  = local.grafana_bootstrap_dashboard_path
+      DATASOURCE_NAME = var.grafana_prometheus_datasource_name
+    }
+  }
+
+  depends_on = [
+    aws_grafana_role_association.roles,
+    aws_grafana_workspace_service_account_token.dashboard_bootstrap
+  ]
 }
 
 resource "aws_ecs_cluster" "this" {

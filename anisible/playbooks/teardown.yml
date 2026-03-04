@@ -1,27 +1,66 @@
 - name: Tear down Kong assessment host
   hosts: kong_hosts
   become: true
+  vars:
+    effective_deployment_runtime: "{{ 'local' if ansible_connection == 'local' and deployment_runtime == 'docker_compose' else deployment_runtime }}"
   tasks:
-    - name: Check for Kong compose file
-      ansible.builtin.stat:
-        path: "{{ kong_install_root }}/docker-compose.yml"
-      register: kong_compose
+    - name: Resolve local runtime execution user
+      ansible.builtin.set_fact:
+        minikube_exec_user: "{{ lookup('env', 'SUDO_USER') | default(lookup('env', 'USER'), true) }}"
+      when: effective_deployment_runtime in ["local", "minikube"]
 
-    - name: Stop Kong stack and remove containers and volumes
-      ansible.builtin.command: docker compose down -v
-      args:
-        chdir: "{{ kong_install_root }}"
-      when: kong_compose.stat.exists
+    - name: Resolve local runtime execution user home
+      ansible.builtin.command: getent passwd "{{ minikube_exec_user }}"
+      register: minikube_exec_passwd
+      changed_when: false
+      when: effective_deployment_runtime in ["local", "minikube"]
+
+    - name: Set local runtime execution facts
+      ansible.builtin.set_fact:
+        minikube_exec_home: "{{ minikube_exec_passwd.stdout.split(':')[5] }}"
+        minikube_exec_kubeconfig: "{{ minikube_exec_passwd.stdout.split(':')[5] }}/.kube/config"
+      when: effective_deployment_runtime in ["local", "minikube"]
+
+    - name: Check local runtime status
+      ansible.builtin.command: minikube status -p "{{ minikube_profile }}"
+      register: minikube_status
+      changed_when: false
+      failed_when: false
+      when: effective_deployment_runtime in ["local", "minikube"]
+      become_user: "{{ minikube_exec_user }}"
+      environment:
+        HOME: "{{ minikube_exec_home }}"
+        KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+        CHANGE_MINIKUBE_NONE_USER: "true"
+
+    - name: Delete local runtime profile
+      ansible.builtin.command: minikube delete -p "{{ minikube_profile }}"
+      when:
+        - effective_deployment_runtime in ["local", "minikube"]
+        - minikube_status.rc == 0
       changed_when: true
+      become_user: "{{ minikube_exec_user }}"
+      environment:
+        HOME: "{{ minikube_exec_home }}"
+        KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+        CHANGE_MINIKUBE_NONE_USER: "true"
 
-    - name: Check for observability compose file
+    - name: Check for legacy root-owned local runtime profile
       ansible.builtin.stat:
-        path: "{{ observability_install_root }}/docker-compose.yml"
-      register: observability_compose
+        path: "/root/.minikube/profiles/{{ minikube_profile }}"
+      register: root_minikube_profile
+      when:
+        - effective_deployment_runtime in ["local", "minikube"]
+        - minikube_exec_user != "root"
 
-    - name: Stop observability stack and remove containers and volumes
-      ansible.builtin.command: docker compose down -v
-      args:
-        chdir: "{{ observability_install_root }}"
-      when: observability_compose.stat.exists
+    - name: Delete legacy root-owned local runtime profile
+      ansible.builtin.command: minikube delete -p "{{ minikube_profile }}"
+      when:
+        - effective_deployment_runtime in ["local", "minikube"]
+        - minikube_exec_user != "root"
+        - root_minikube_profile.stat.exists
       changed_when: true
+      environment:
+        HOME: /root
+        KUBECONFIG: /root/.kube/config
+        CHANGE_MINIKUBE_NONE_USER: "true"

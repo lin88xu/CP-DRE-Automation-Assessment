@@ -40,7 +40,7 @@ output "amp_workspace_arn" {
 
 output "amp_prometheus_endpoint" {
   value       = var.enable_managed_observability ? aws_prometheus_workspace.this[0].prometheus_endpoint : null
-  description = "Base query endpoint for the Amazon Managed Service for Prometheus workspace."
+  description = "Base query endpoint of the Amazon Managed Service for Prometheus workspace."
 }
 
 output "amp_remote_write_endpoint" {
@@ -59,6 +59,11 @@ output "grafana_workspace_arn" {
 }
 
 output "grafana_workspace_url" {
-  value       = var.enable_managed_observability ? aws_grafana_workspace.this[0].endpoint : null
+  value       = var.enable_managed_observability ? "https://${aws_grafana_workspace.this[0].endpoint}" : null
   description = "Amazon Managed Grafana workspace URL."
+}
+
+output "grafana_kong_dashboard_url" {
+  value       = var.enable_managed_observability ? "https://${trimsuffix(aws_grafana_workspace.this[0].endpoint, "/")}/d/mY9p7dQmz" : null
+  description = "Direct URL to the imported Kong official dashboard in Amazon Managed Grafana."
 }

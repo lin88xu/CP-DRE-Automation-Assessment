@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource
+  namespace: {{ minikube_namespace }}
+data:
+  prometheus.yml: |
+    apiVersion: 1
+
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.{{ minikube_namespace }}.svc.cluster.local:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: {{ minikube_namespace }}
+data:
+  dashboards.yml: |
+    apiVersion: 1
+
+    providers:
+      - name: Kong Dashboards
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /etc/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-kong-official
+  namespace: {{ minikube_namespace }}
+data:
+  kong-official.json: |
+{{ lookup('file', playbook_dir ~ '/../../terraform/environments/aws/templates/kong-official.json') | indent(4, true) }}

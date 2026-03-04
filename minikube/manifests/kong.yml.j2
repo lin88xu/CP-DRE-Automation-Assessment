@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+  namespace: {{ minikube_namespace }}
+spec:
+  replicas: {{ minikube_kong_replicas }}
+  selector:
+    matchLabels:
+      app: kong
+  template:
+    metadata:
+      labels:
+        app: kong
+    spec:
+      containers:
+        - name: kong
+          image: {{ kong_image }}
+          ports:
+            - containerPort: 8000
+              name: proxy
+            - containerPort: 8001
+              name: admin
+            - containerPort: 8002
+              name: manager
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_PROXY_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_PROXY_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_PROXY_LISTEN
+              value: 0.0.0.0:8000
+            - name: KONG_ADMIN_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_ADMIN_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_ADMIN_LISTEN
+              value: 0.0.0.0:8001
+            - name: KONG_ADMIN_GUI_URL
+              value: http://{{ minikube_public_host }}:{{ minikube_kong_manager_nodeport }}
+            - name: KONG_ADMIN_GUI_LISTEN
+              value: 0.0.0.0:8002
+            - name: KONG_ADMIN_GUI_AUTH
+              value: basic-auth
+            - name: KONG_ADMIN_GUI_AUTH_CONF
+              value: '{"secret":"kong-secret"}'
+            - name: KONG_ADMIN_GUI_SESSION_CONF
+              value: '{"secret":"kong-session-secret"}'
+            - name: KONG_ENFORCE_RBAC
+              value: "off"
+            - name: KONG_LOG_LEVEL
+              value: info
+            - name: KONG_NGINX_WORKER_PROCESSES
+              value: "1"
+            - name: KONG_PREFIX
+              value: /usr/local/kong
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /etc/kong/declarative/kong.yml
+            - name: KONG_DECLARATIVE_CONFIG_ENCODED
+              value: "false"
+          readinessProbe:
+            tcpSocket:
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: {{ minikube_kong_cpu_request }}
+              memory: {{ minikube_kong_memory_request }}
+            limits:
+              cpu: {{ minikube_kong_cpu_limit }}
+              memory: {{ minikube_kong_memory_limit }}
+          volumeMounts:
+            - name: kong-config
+              mountPath: /etc/kong/declarative
+              readOnly: true
+      volumes:
+        - name: kong-config
+          configMap:
+            name: kong-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong
+  namespace: {{ minikube_namespace }}
+spec:
+  type: NodePort
+  selector:
+    app: kong
+  ports:
+    - name: proxy
+      port: 8000
+      targetPort: proxy
+      nodePort: {{ minikube_kong_proxy_nodeport }}
+    - name: admin
+      port: 8001
+      targetPort: admin
+      nodePort: {{ minikube_kong_admin_nodeport }}
+    - name: manager
+      port: 8002
+      targetPort: manager
+      nodePort: {{ minikube_kong_manager_nodeport }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kong
+  namespace: {{ minikube_namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kong
+  minReplicas: {{ minikube_kong_min_replicas }}
+  maxReplicas: {{ minikube_kong_max_replicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ minikube_kong_target_cpu_utilization }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ minikube_kong_target_memory_utilization }}

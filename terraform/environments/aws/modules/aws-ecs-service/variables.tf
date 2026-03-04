@@ -129,6 +129,51 @@ variable "observability_scrape_interval" {
   description = "Prometheus scrape and evaluation interval for the ECS metrics collector."
 }
 
+variable "grafana_admin_user_ids" {
+  type        = list(string)
+  description = "IAM Identity Center user IDs to assign the Admin role in the Amazon Managed Grafana workspace."
+}
+
+variable "grafana_editor_user_ids" {
+  type        = list(string)
+  description = "IAM Identity Center user IDs to assign the Editor role in the Amazon Managed Grafana workspace."
+}
+
+variable "grafana_viewer_user_ids" {
+  type        = list(string)
+  description = "IAM Identity Center user IDs to assign the Viewer role in the Amazon Managed Grafana workspace."
+}
+
+variable "grafana_admin_group_ids" {
+  type        = list(string)
+  description = "IAM Identity Center group IDs to assign the Admin role in the Amazon Managed Grafana workspace."
+}
+
+variable "grafana_editor_group_ids" {
+  type        = list(string)
+  description = "IAM Identity Center group IDs to assign the Editor role in the Amazon Managed Grafana workspace."
+}
+
+variable "grafana_viewer_group_ids" {
+  type        = list(string)
+  description = "IAM Identity Center group IDs to assign the Viewer role in the Amazon Managed Grafana workspace."
+}
+
+variable "enable_grafana_dashboard_bootstrap" {
+  type        = bool
+  description = "Whether Terraform should create the AMP data source and import the official Kong dashboard into Amazon Managed Grafana."
+}
+
+variable "grafana_dashboard_service_account_token_ttl" {
+  type        = number
+  description = "Lifetime in seconds for the temporary AMG service account token used to bootstrap the dashboard and data source."
+}
+
+variable "grafana_prometheus_datasource_name" {
+  type        = string
+  description = "Datasource name created in Amazon Managed Grafana for querying the AMP workspace."
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags applied to AWS resources."
