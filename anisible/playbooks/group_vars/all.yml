@@ -1,3 +1,5 @@
+deployment_runtime: docker_compose
+
 kong_install_root: /opt/kong
 kong_name_prefix: kong
 kong_public_host: "{{ ansible_host | default(inventory_hostname) }}"
@@ -20,3 +22,34 @@ observability_grafana_admin_password: admin
 observability_scrape_host: host.docker.internal
 observability_scrape_port: "{{ kong_admin_port }}"
 observability_kong_job_name: kong-admin
+
+minikube_install_root: /opt/minikube
+minikube_profile: kong-assessment
+minikube_driver: docker
+minikube_cpus: 4
+minikube_memory_mb: 8192
+minikube_namespace: kong
+minikube_public_host: "{{ kong_public_host }}"
+minikube_kong_proxy_nodeport: 30080
+minikube_kong_admin_nodeport: 30081
+minikube_kong_manager_nodeport: 30082
+minikube_prometheus_nodeport: 30090
+minikube_grafana_nodeport: 30030
+minikube_httpbin_replicas: 1
+minikube_kong_replicas: 1
+minikube_kong_min_replicas: 1
+minikube_kong_max_replicas: 5
+minikube_kong_cpu_request: 250m
+minikube_kong_cpu_limit: 1000m
+minikube_kong_memory_request: 512Mi
+minikube_kong_memory_limit: 1024Mi
+minikube_kong_target_cpu_utilization: 60
+minikube_kong_target_memory_utilization: 70
+minikube_prometheus_cpu_request: 150m
+minikube_prometheus_cpu_limit: 500m
+minikube_prometheus_memory_request: 256Mi
+minikube_prometheus_memory_limit: 768Mi
+minikube_grafana_cpu_request: 100m
+minikube_grafana_cpu_limit: 500m
+minikube_grafana_memory_request: 256Mi
+minikube_grafana_memory_limit: 512Mi

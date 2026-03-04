@@ -4,9 +4,10 @@ This directory provides the configuration-management layer for the assessment.
 
 ## What It Does
 
-- Installs Docker and Docker Compose on the target host
-- Deploys the Kong stack to `/opt/kong`
-- Deploys the Prometheus and Grafana stack to `/opt/observability`
+- Installs Docker for the local Minikube runtime
+- Installs Minikube and `kubectl` for the local runtime
+- Applies the Kubernetes manifests stored under [minikube/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/minikube) and creates a HorizontalPodAutoscaler for Kong
+- Keeps the Azure host-based Docker Compose path available through the shared roles
 
 ## Prerequisites
 
@@ -16,7 +17,7 @@ To run these playbooks locally, ensure the control machine has:
 - `pip`
 - `ansible` / `ansible-playbook`
 - `terraform` for the local handoff flow
-- `docker` and `docker compose`
+- `docker`
 - `sudo` access for `become`
 
 Recommended checks:
@@ -25,7 +26,6 @@ Recommended checks:
 ansible-playbook --version
 terraform version
 docker version
-docker compose version
 ```
 
 ## Layout
@@ -44,10 +44,22 @@ anisible/
 └── roles/
     ├── docker/
     ├── kong/
+    ├── minikube/
     └── observability/
 ```
 
 ## Run Locally
+
+From the repository root, the simplest local wrapper is:
+
+```bash
+./local-runtime.sh
+```
+
+It manages a single local runtime backed by Minikube and supports `up`, `down`,
+`toggle`, and `status`.
+
+Manual equivalent:
 
 ```bash
 cd terraform/environments/local
@@ -63,7 +75,8 @@ ansible-playbook \
   -K \
   -i ../terraform/environments/local/generated/hosts.yml \
   playbooks/site.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml \
+  -e deployment_runtime=local
 ```
 
 Replace `<repo-root>` with the directory where you cloned this repository. If the repository is being run from WSL under `/mnt/c/...`, Ansible may ignore `ansible.cfg` because the path is considered world-writable. In that case, either set `ANSIBLE_CONFIG` as shown above or use:
@@ -76,10 +89,13 @@ ansible-playbook \
   -K \
   -i ../terraform/environments/local/generated/hosts.yml \
   playbooks/site.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml \
+  -e deployment_runtime=local
 ```
 
 For local runs, `-K` prompts for the sudo password required by `become`.
+
+The local runtime uses the manifests in [minikube/manifests/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/minikube/manifests).
 
 ## Tear Down Local Deployment
 
@@ -91,7 +107,8 @@ ansible-playbook \
   -K \
   -i ../terraform/environments/local/generated/hosts.yml \
   playbooks/teardown.yml \
-  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml
+  -e @../terraform/environments/local/generated/terraform-ansible-vars.yml \
+  -e deployment_runtime=local
 ```
 
 ## Run Against AWS Or Azure
