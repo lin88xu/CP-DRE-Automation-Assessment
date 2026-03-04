@@ -43,7 +43,7 @@ EXPECTED_PROMETHEUS_EXPRESSIONS = [
     "sum(kong_nginx_connections_total",
 ]
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SOURCE_DASHBOARD_PATH = REPO_ROOT / "kong/kong/plugins/prometheus/grafana/kong-official.json"
+SOURCE_DASHBOARD_PATH = REPO_ROOT / "terraform/environments/aws/templates/kong-official.json"
 
 
 def grafana_headers() -> Dict[str, str]:

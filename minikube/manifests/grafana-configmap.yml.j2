@@ -40,4 +40,4 @@ metadata:
   namespace: {{ minikube_namespace }}
 data:
   kong-official.json: |
-{{ lookup('file', playbook_dir ~ '/../../kong/kong/plugins/prometheus/grafana/kong-official.json') | indent(4, true) }}
+{{ lookup('file', playbook_dir ~ '/../../terraform/environments/aws/templates/kong-official.json') | indent(4, true) }}
