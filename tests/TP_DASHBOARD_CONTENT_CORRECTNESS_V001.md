@@ -62,7 +62,7 @@
 - Local runtime deployed with `./local-runtime.sh up`
 - Python 3 available
 - Grafana reachable on `http://127.0.0.1:3000`
-- Grafana credentials available, defaulting to `admin/admin`
+- Grafana credentials available from the local runtime output or `anisible/.secrets/localhost/`
 
 ## 11. Responsibilities
 

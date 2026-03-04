@@ -9,13 +9,13 @@ output "proxy_url" {
 }
 
 output "admin_url" {
-  value       = "http://${aws_lb.this.dns_name}:${var.admin_port}"
-  description = "Kong Admin API URL."
+  value       = var.publish_admin_api ? "http://${aws_lb.this.dns_name}:${var.admin_port}" : null
+  description = "Kong Admin API URL when public access is enabled."
 }
 
 output "manager_url" {
-  value       = "http://${aws_lb.this.dns_name}:${var.manager_port}"
-  description = "Kong Manager URL."
+  value       = var.publish_manager_ui ? "http://${aws_lb.this.dns_name}:${var.manager_port}" : null
+  description = "Kong Manager URL when public access is enabled."
 }
 
 output "ecs_cluster_name" {
@@ -26,6 +26,16 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   value       = aws_ecs_service.this.name
   description = "ECS service name."
+}
+
+output "postgres_efs_file_system_id" {
+  value       = aws_efs_file_system.kong_postgres.id
+  description = "EFS file system ID used for PostgreSQL data persistence."
+}
+
+output "postgres_efs_access_point_id" {
+  value       = aws_efs_access_point.kong_postgres.id
+  description = "EFS access point ID used by the ECS task for PostgreSQL data."
 }
 
 output "amp_workspace_id" {

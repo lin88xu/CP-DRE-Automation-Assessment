@@ -1,3 +1,13 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kong-admin-secrets
+  namespace: {{ minikube_namespace }}
+type: Opaque
+stringData:
+  admin_gui_auth_conf: '{{ {"secret": kong_admin_gui_auth_secret} | to_json }}'
+  admin_gui_session_conf: '{{ {"secret": kong_admin_gui_session_secret} | to_json }}'
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,6 +26,7 @@ spec:
       containers:
         - name: kong
           image: {{ kong_image }}
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
               name: proxy
@@ -25,7 +36,20 @@ spec:
               name: manager
           env:
             - name: KONG_DATABASE
-              value: "off"
+              value: postgres
+            - name: KONG_PG_HOST
+              value: {{ kong_postgres_service_name }}
+            - name: KONG_PG_PORT
+              value: "{{ kong_db_port }}"
+            - name: KONG_PG_USER
+              value: "{{ kong_postgres_user }}"
+            - name: KONG_PG_DATABASE
+              value: "{{ kong_postgres_database }}"
+            - name: KONG_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kong-db-auth
+                  key: postgres-password
             - name: KONG_PROXY_ACCESS_LOG
               value: /dev/stdout
             - name: KONG_PROXY_ERROR_LOG
@@ -39,15 +63,21 @@ spec:
             - name: KONG_ADMIN_LISTEN
               value: 0.0.0.0:8001
             - name: KONG_ADMIN_GUI_URL
-              value: http://{{ minikube_public_host }}:{{ minikube_kong_manager_nodeport }}
+              value: http://127.0.0.1:8002
             - name: KONG_ADMIN_GUI_LISTEN
               value: 0.0.0.0:8002
             - name: KONG_ADMIN_GUI_AUTH
               value: basic-auth
             - name: KONG_ADMIN_GUI_AUTH_CONF
-              value: '{"secret":"kong-secret"}'
+              valueFrom:
+                secretKeyRef:
+                  name: kong-admin-secrets
+                  key: admin_gui_auth_conf
             - name: KONG_ADMIN_GUI_SESSION_CONF
-              value: '{"secret":"kong-session-secret"}'
+              valueFrom:
+                secretKeyRef:
+                  name: kong-admin-secrets
+                  key: admin_gui_session_conf
             - name: KONG_ENFORCE_RBAC
               value: "off"
             - name: KONG_LOG_LEVEL
@@ -56,10 +86,6 @@ spec:
               value: "1"
             - name: KONG_PREFIX
               value: /usr/local/kong
-            - name: KONG_DECLARATIVE_CONFIG
-              value: /etc/kong/declarative/kong.yml
-            - name: KONG_DECLARATIVE_CONFIG_ENCODED
-              value: "false"
           readinessProbe:
             tcpSocket:
               port: admin
@@ -77,19 +103,30 @@ spec:
             limits:
               cpu: {{ minikube_kong_cpu_limit }}
               memory: {{ minikube_kong_memory_limit }}
-          volumeMounts:
-            - name: kong-config
-              mountPath: /etc/kong/declarative
-              readOnly: true
-      volumes:
-        - name: kong-config
-          configMap:
-            name: kong-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: kong
+  namespace: {{ minikube_namespace }}
+spec:
+  selector:
+    app: kong
+  ports:
+    - name: proxy
+      port: 8000
+      targetPort: proxy
+    - name: admin
+      port: 8001
+      targetPort: admin
+    - name: manager
+      port: 8002
+      targetPort: manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-proxy
   namespace: {{ minikube_namespace }}
 spec:
   type: NodePort
@@ -100,14 +137,6 @@ spec:
       port: 8000
       targetPort: proxy
       nodePort: {{ minikube_kong_proxy_nodeport }}
-    - name: admin
-      port: 8001
-      targetPort: admin
-      nodePort: {{ minikube_kong_admin_nodeport }}
-    - name: manager
-      port: 8002
-      targetPort: manager
-      nodePort: {{ minikube_kong_manager_nodeport }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

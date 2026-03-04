@@ -40,8 +40,8 @@ variable "vm_size" {
 
 variable "admin_cidr" {
   type        = string
-  description = "CIDR allowed to reach SSH and Kong ports."
-  default     = "0.0.0.0/0"
+  description = "CIDR allowed to reach SSH and any published management ports."
+  default     = "203.0.113.10/32"
 }
 
 variable "vnet_cidr" {
@@ -92,6 +92,18 @@ variable "manager_port" {
   default     = 8002
 }
 
+variable "publish_admin_api" {
+  type        = bool
+  description = "Whether to publish the Kong Admin API on the VM public IP."
+  default     = false
+}
+
+variable "publish_manager_ui" {
+  type        = bool
+  description = "Whether to publish the Kong Manager UI on the VM public IP."
+  default     = false
+}
+
 variable "app_host_header" {
   type        = string
   description = "Host header used by the sample Kong route."
@@ -112,4 +124,3 @@ variable "tags" {
     stack   = "kong"
   }
 }
-

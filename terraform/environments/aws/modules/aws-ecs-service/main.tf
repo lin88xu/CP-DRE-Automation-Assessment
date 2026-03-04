@@ -39,7 +39,25 @@ locals {
     upstream_url    = var.upstream_url
   })
   kong_container_name    = "${var.name_prefix}-kong"
+  kong_postgres_name     = "${var.name_prefix}-postgres"
+  kong_bootstrap_name    = "${var.name_prefix}-kong-bootstrap"
+  kong_postgres_database = "kong"
+  kong_postgres_user     = "kong"
+  kong_postgres_host     = "127.0.0.1"
+  kong_postgres_uid      = 70
+  kong_postgres_gid      = 70
+  kong_postgres_efs_path = "/kong-postgres"
   kong_config_string     = local.docker_kong
+  kong_config_base64     = base64encode(local.kong_config_string)
+  kong_bootstrap_command = join("\n", [
+    "set -eu",
+    "echo '${local.kong_config_base64}' | base64 -d >/tmp/kong.yml",
+    "if ! kong migrations bootstrap; then",
+    "  kong migrations up -y",
+    "fi",
+    "kong migrations finish -y || true",
+    "kong config db_import /tmp/kong.yml"
+  ])
   ecs_resource_id        = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.this.name}"
   proxy_resource_label   = "${aws_lb.this.arn_suffix}/${aws_lb_target_group.proxy.arn_suffix}"
   amp_workspace_alias    = "${var.name_prefix}-amp"
@@ -95,13 +113,90 @@ locals {
   ])
   grafana_bootstrap_enabled        = var.enable_managed_observability && var.enable_grafana_dashboard_bootstrap
   grafana_bootstrap_dashboard_path = "${path.module}/../../templates/kong-official.json"
+  publish_admin_api                = var.publish_admin_api
+  publish_manager_ui               = var.publish_manager_ui
   common_tags = merge(var.tags, {
     ManagedBy = "Terraform"
   })
+  postgres_container_definition = {
+    name      = local.kong_postgres_name
+    image     = var.postgres_image
+    essential = true
+    environment = [
+      { name = "POSTGRES_DB", value = local.kong_postgres_database },
+      { name = "POSTGRES_USER", value = local.kong_postgres_user }
+    ]
+    secrets = [
+      { name = "POSTGRES_PASSWORD", valueFrom = aws_secretsmanager_secret.kong_postgres_password.arn }
+    ]
+    mountPoints = [
+      {
+        sourceVolume  = "kong-db-data"
+        containerPath = "/var/lib/postgresql/data"
+        readOnly      = false
+      }
+    ]
+    healthCheck = {
+      command     = ["CMD-SHELL", "pg_isready -U ${local.kong_postgres_user} -d ${local.kong_postgres_database}"]
+      interval    = 10
+      timeout     = 5
+      retries     = 5
+      startPeriod = 20
+    }
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.kong.name
+        awslogs-region        = data.aws_region.current.name
+        awslogs-stream-prefix = "postgres"
+      }
+    }
+  }
+  kong_bootstrap_container_definition = {
+    name      = local.kong_bootstrap_name
+    image     = var.kong_image
+    essential = false
+    dependsOn = [
+      {
+        containerName = local.kong_postgres_name
+        condition     = "HEALTHY"
+      }
+    ]
+    entryPoint = ["/bin/sh", "-ec"]
+    command    = [local.kong_bootstrap_command]
+    environment = [
+      { name = "KONG_DATABASE", value = "postgres" },
+      { name = "KONG_PG_HOST", value = local.kong_postgres_host },
+      { name = "KONG_PG_PORT", value = "5432" },
+      { name = "KONG_PG_USER", value = local.kong_postgres_user },
+      { name = "KONG_PG_DATABASE", value = local.kong_postgres_database }
+    ]
+    secrets = [
+      { name = "KONG_PG_PASSWORD", valueFrom = aws_secretsmanager_secret.kong_postgres_password.arn }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.kong.name
+        awslogs-region        = data.aws_region.current.name
+        awslogs-stream-prefix = "kong-bootstrap"
+      }
+    }
+  }
   kong_container_definition = {
     name      = local.kong_container_name
     image     = var.kong_image
     essential = true
+    dependsOn = [
+      {
+        containerName = local.kong_postgres_name
+        condition     = "HEALTHY"
+      },
+      {
+        containerName = local.kong_bootstrap_name
+        condition     = "SUCCESS"
+      }
+    ]
     portMappings = [
       {
         containerPort = 8000
@@ -120,7 +215,11 @@ locals {
       }
     ]
     environment = [
-      { name = "KONG_DATABASE", value = "off" },
+      { name = "KONG_DATABASE", value = "postgres" },
+      { name = "KONG_PG_HOST", value = local.kong_postgres_host },
+      { name = "KONG_PG_PORT", value = "5432" },
+      { name = "KONG_PG_USER", value = local.kong_postgres_user },
+      { name = "KONG_PG_DATABASE", value = local.kong_postgres_database },
       { name = "KONG_PROXY_ACCESS_LOG", value = "/dev/stdout" },
       { name = "KONG_PROXY_ERROR_LOG", value = "/dev/stderr" },
       { name = "KONG_PROXY_LISTEN", value = "0.0.0.0:8000" },
@@ -130,12 +229,14 @@ locals {
       { name = "KONG_ADMIN_GUI_URL", value = "http://${aws_lb.this.dns_name}:${var.manager_port}" },
       { name = "KONG_ADMIN_GUI_LISTEN", value = "0.0.0.0:8002" },
       { name = "KONG_ADMIN_GUI_AUTH", value = "basic-auth" },
-      { name = "KONG_ADMIN_GUI_AUTH_CONF", value = "{\"secret\":\"kong-secret\"}" },
-      { name = "KONG_ADMIN_GUI_SESSION_CONF", value = "{\"secret\":\"kong-session-secret\"}" },
       { name = "KONG_ENFORCE_RBAC", value = "off" },
       { name = "KONG_LOG_LEVEL", value = "info" },
-      { name = "KONG_PREFIX", value = "/usr/local/kong" },
-      { name = "KONG_DECLARATIVE_CONFIG_STRING", value = local.kong_config_string }
+      { name = "KONG_PREFIX", value = "/usr/local/kong" }
+    ]
+    secrets = [
+      { name = "KONG_PG_PASSWORD", valueFrom = aws_secretsmanager_secret.kong_postgres_password.arn },
+      { name = "KONG_ADMIN_GUI_AUTH_CONF", valueFrom = aws_secretsmanager_secret.kong_admin_gui_auth_conf.arn },
+      { name = "KONG_ADMIN_GUI_SESSION_CONF", valueFrom = aws_secretsmanager_secret.kong_admin_gui_session_conf.arn }
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -207,6 +308,60 @@ locals {
   } : null
 }
 
+resource "random_password" "kong_admin_gui_auth_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "kong_admin_gui_session_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "kong_postgres_password" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "kong_admin_gui_auth_conf" {
+  name_prefix = "${var.name_prefix}-kong-admin-gui-auth-"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-admin-gui-auth"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "kong_admin_gui_auth_conf" {
+  secret_id     = aws_secretsmanager_secret.kong_admin_gui_auth_conf.id
+  secret_string = jsonencode({ secret = random_password.kong_admin_gui_auth_secret.result })
+}
+
+resource "aws_secretsmanager_secret" "kong_admin_gui_session_conf" {
+  name_prefix = "${var.name_prefix}-kong-admin-gui-session-"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-admin-gui-session"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "kong_admin_gui_session_conf" {
+  secret_id     = aws_secretsmanager_secret.kong_admin_gui_session_conf.id
+  secret_string = jsonencode({ secret = random_password.kong_admin_gui_session_secret.result })
+}
+
+resource "aws_secretsmanager_secret" "kong_postgres_password" {
+  name_prefix = "${var.name_prefix}-kong-postgres-password-"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-postgres-password"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "kong_postgres_password" {
+  secret_id     = aws_secretsmanager_secret.kong_postgres_password.id
+  secret_string = random_password.kong_postgres_password.result
+}
+
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -269,20 +424,26 @@ resource "aws_security_group" "alb" {
     cidr_blocks = [var.admin_cidr]
   }
 
-  ingress {
-    description = "Kong Admin API"
-    from_port   = var.admin_port
-    to_port     = var.admin_port
-    protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
+  dynamic "ingress" {
+    for_each = local.publish_admin_api ? [1] : []
+    content {
+      description = "Kong Admin API"
+      from_port   = var.admin_port
+      to_port     = var.admin_port
+      protocol    = "tcp"
+      cidr_blocks = [var.admin_cidr]
+    }
   }
 
-  ingress {
-    description = "Kong Manager UI"
-    from_port   = var.manager_port
-    to_port     = var.manager_port
-    protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
+  dynamic "ingress" {
+    for_each = local.publish_manager_ui ? [1] : []
+    content {
+      description = "Kong Manager UI"
+      from_port   = var.manager_port
+      to_port     = var.manager_port
+      protocol    = "tcp"
+      cidr_blocks = [var.admin_cidr]
+    }
   }
 
   egress {
@@ -336,6 +497,70 @@ resource "aws_security_group" "task" {
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-task-sg"
   })
+}
+
+resource "aws_security_group" "efs" {
+  name        = "${var.name_prefix}-efs-sg"
+  description = "NFS access for Kong Postgres EFS"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "NFS from Kong ECS tasks"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.task.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-efs-sg"
+  })
+}
+
+resource "aws_efs_file_system" "kong_postgres" {
+  encrypted = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-postgres"
+  })
+}
+
+resource "aws_efs_access_point" "kong_postgres" {
+  file_system_id = aws_efs_file_system.kong_postgres.id
+
+  posix_user {
+    uid = local.kong_postgres_uid
+    gid = local.kong_postgres_gid
+  }
+
+  root_directory {
+    path = local.kong_postgres_efs_path
+
+    creation_info {
+      owner_gid   = local.kong_postgres_gid
+      owner_uid   = local.kong_postgres_uid
+      permissions = "0700"
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.name_prefix}-kong-postgres-ap"
+  })
+}
+
+resource "aws_efs_mount_target" "kong_postgres" {
+  count = length(aws_subnet.public)
+
+  file_system_id  = aws_efs_file_system.kong_postgres.id
+  subnet_id       = aws_subnet.public[count.index].id
+  security_groups = [aws_security_group.efs.id]
 }
 
 resource "aws_lb" "this" {
@@ -497,6 +722,28 @@ resource "aws_iam_role_policy_attachment" "execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+resource "aws_iam_role_policy" "execution_secrets" {
+  name = "${var.name_prefix}-execution-secrets"
+  role = aws_iam_role.execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          aws_secretsmanager_secret.kong_postgres_password.arn,
+          aws_secretsmanager_secret.kong_admin_gui_auth_conf.arn,
+          aws_secretsmanager_secret.kong_admin_gui_session_conf.arn
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role" "task" {
   count = var.enable_managed_observability ? 1 : 0
 
@@ -638,14 +885,39 @@ resource "aws_ecs_task_definition" "this" {
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = var.enable_managed_observability ? aws_iam_role.task[0].arn : null
 
+  volume {
+    name = "kong-db-data"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.kong_postgres.id
+      transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.kong_postgres.id
+      }
+    }
+  }
+
   container_definitions = jsonencode(concat(
-    [local.kong_container_definition],
+    [
+      local.postgres_container_definition,
+      local.kong_bootstrap_container_definition,
+      local.kong_container_definition
+    ],
     var.enable_managed_observability ? [local.amp_collector_container_definition] : []
   ))
 
   tags = merge(local.common_tags, {
     Name = "${var.name_prefix}-task"
   })
+
+  depends_on = [
+    aws_iam_role_policy.execution_secrets,
+    aws_efs_mount_target.kong_postgres,
+    aws_secretsmanager_secret_version.kong_postgres_password,
+    aws_secretsmanager_secret_version.kong_admin_gui_auth_conf,
+    aws_secretsmanager_secret_version.kong_admin_gui_session_conf
+  ]
 }
 
 resource "aws_ecs_service" "this" {
@@ -681,10 +953,12 @@ resource "aws_ecs_service" "this" {
   }
 
   depends_on = [
+    aws_efs_mount_target.kong_postgres,
     aws_lb_listener.proxy,
     aws_lb_listener.admin,
     aws_lb_listener.manager,
     aws_iam_role_policy_attachment.execution,
+    aws_iam_role_policy.execution_secrets,
     aws_prometheus_rule_group_namespace.alerts,
     aws_prometheus_rule_group_namespace.recording
   ]

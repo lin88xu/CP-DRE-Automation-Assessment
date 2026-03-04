@@ -14,6 +14,12 @@ cat >/opt/kong/docker-compose.yml <<'EOF'
 ${docker_compose}
 EOF
 
+cat >/opt/kong/kong.env <<'EOF'
+${kong_env}
+EOF
+
+chmod 600 /opt/kong/kong.env
+
 cat >/opt/kong/docker-kong.yml <<'EOF'
 ${docker_kong}
 EOF

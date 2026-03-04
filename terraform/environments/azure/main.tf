@@ -16,8 +16,9 @@ module "kong" {
   proxy_port          = var.proxy_port
   admin_port          = var.admin_port
   manager_port        = var.manager_port
+  publish_admin_api   = var.publish_admin_api
+  publish_manager_ui  = var.publish_manager_ui
   app_host_header     = var.app_host_header
   upstream_url        = var.upstream_url
   tags                = var.tags
 }
-

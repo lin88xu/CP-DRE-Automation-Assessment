@@ -6,19 +6,32 @@ kong_public_host: "{{ ansible_host | default(inventory_hostname) }}"
 kong_proxy_port: 8000
 kong_admin_port: 8001
 kong_manager_port: 8002
+kong_manager_public_host: 127.0.0.1
+kong_proxy_bind_host: 0.0.0.0
+kong_admin_bind_host: 127.0.0.1
+kong_manager_bind_host: 127.0.0.1
 kong_db_port: 5432
-kong_image: "kong:latest"
+kong_database_mode: postgres
+kong_postgres_service_name: kong-db
+kong_postgres_database: kong
+kong_postgres_user: kong
+kong_postgres_password: ""
+kong_image: "kong:3.9.1"
 kong_postgres_image: "postgres:15-alpine"
 kong_app_host_header: example.com
 kong_upstream_url: http://httpbin.org
+kong_admin_gui_auth_secret: ""
+kong_admin_gui_session_secret: ""
 
 observability_install_root: /opt/observability
 observability_prometheus_port: 9090
 observability_grafana_port: 3000
+observability_prometheus_bind_host: 127.0.0.1
+observability_grafana_bind_host: 127.0.0.1
 observability_prometheus_image: "prom/prometheus:v2.54.1"
 observability_grafana_image: "grafana/grafana:11.1.3"
-observability_grafana_admin_user: admin
-observability_grafana_admin_password: admin
+observability_grafana_admin_user: ""
+observability_grafana_admin_password: ""
 observability_scrape_host: host.docker.internal
 observability_scrape_port: "{{ kong_admin_port }}"
 observability_kong_job_name: kong-admin
@@ -31,6 +44,8 @@ minikube_memory_mb: "{{ lookup('env', 'MINIKUBE_MEMORY_MB') | default('8192', tr
 minikube_namespace: kong
 minikube_public_host: "{{ kong_public_host }}"
 minikube_storage_class_name: ""
+minikube_postgres_pvc_name: kong-db-storage
+minikube_postgres_storage_size: 8Gi
 minikube_prometheus_pvc_name: prometheus-storage
 minikube_prometheus_storage_size: 8Gi
 minikube_grafana_pvc_name: grafana-storage
@@ -46,12 +61,18 @@ minikube_kong_min_replicas: 1
 minikube_kong_max_replicas: 5
 minikube_httpbin_rollout_timeout: "{{ lookup('env', 'MINIKUBE_HTTPBIN_ROLLOUT_TIMEOUT') | default('180s', true) }}"
 minikube_kong_rollout_timeout: "{{ lookup('env', 'MINIKUBE_KONG_ROLLOUT_TIMEOUT') | default('240s', true) }}"
+minikube_postgres_rollout_timeout: "{{ lookup('env', 'MINIKUBE_POSTGRES_ROLLOUT_TIMEOUT') | default('180s', true) }}"
+minikube_kong_bootstrap_timeout: "{{ lookup('env', 'MINIKUBE_KONG_BOOTSTRAP_TIMEOUT') | default('600s', true) }}"
 minikube_prometheus_rollout_timeout: "{{ lookup('env', 'MINIKUBE_PROMETHEUS_ROLLOUT_TIMEOUT') | default('180s', true) }}"
 minikube_grafana_rollout_timeout: "{{ lookup('env', 'MINIKUBE_GRAFANA_ROLLOUT_TIMEOUT') | default('180s', true) }}"
 minikube_kong_cpu_request: 250m
 minikube_kong_cpu_limit: 1000m
 minikube_kong_memory_request: 512Mi
 minikube_kong_memory_limit: 1024Mi
+minikube_postgres_cpu_request: 100m
+minikube_postgres_cpu_limit: 500m
+minikube_postgres_memory_request: 256Mi
+minikube_postgres_memory_limit: 512Mi
 minikube_kong_target_cpu_utilization: 60
 minikube_kong_target_memory_utilization: 70
 minikube_prometheus_cpu_request: 150m

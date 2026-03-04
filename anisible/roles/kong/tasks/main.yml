@@ -10,6 +10,13 @@
     dest: "{{ kong_install_root }}/docker-compose.yml"
     mode: "0644"
 
+- name: Render Kong secret environment file
+  no_log: true
+  ansible.builtin.template:
+    src: kong.env.j2
+    dest: "{{ kong_install_root }}/kong.env"
+    mode: "0600"
+
 - name: Render Kong declarative configuration
   ansible.builtin.template:
     src: docker-kong.yml.j2

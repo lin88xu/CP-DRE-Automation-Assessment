@@ -13,6 +13,16 @@ output "manager_url" {
   description = "Kong Manager URL."
 }
 
+output "postgres_efs_file_system_id" {
+  value       = module.kong.postgres_efs_file_system_id
+  description = "EFS file system ID used for Kong PostgreSQL data."
+}
+
+output "postgres_efs_access_point_id" {
+  value       = module.kong.postgres_efs_access_point_id
+  description = "EFS access point ID used for Kong PostgreSQL data."
+}
+
 output "grafana_workspace_url" {
   value       = module.kong.grafana_workspace_url
   description = "Amazon Managed Grafana workspace URL."

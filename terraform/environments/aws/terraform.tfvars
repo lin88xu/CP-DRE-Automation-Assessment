@@ -1,7 +1,9 @@
 aws_region                    = "ap-southeast-1"
-admin_cidr                    = "0.0.0.0/0"
+admin_cidr                    = "203.0.113.10/32"
 subnet_cidr                   = "10.20.1.0/24"
 secondary_subnet_cidr         = "10.20.2.0/24"
+publish_admin_api             = false
+publish_manager_ui            = false
 desired_count                 = 1
 min_capacity                  = 1
 max_capacity                  = 4
@@ -34,4 +36,5 @@ grafana_prometheus_datasource_name          = "Amazon Managed Service for Promet
 # to grant AMG workspace access during deployment. Do not place the same user or
 # group ID in more than one role list. Terraform also bootstraps the AMG workspace
 # with an AMP data source and the "Kong (official)" dashboard.
-# Adjust the task size, scaling targets, or CIDR values here if your environment needs them.
+# Keep admin_cidr narrow and only flip publish_admin_api / publish_manager_ui to true
+# when you explicitly need direct public management access.

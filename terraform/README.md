@@ -145,7 +145,7 @@ If metrics do not appear, check the ECS task logs in CloudWatch under `/ecs/<nam
 
 - Docker must already be available for the `local` target.
 - AWS credentials and Azure credentials must be configured in the shell or standard provider locations.
-- The AWS target exposes ports `8000`, `8001`, and `8002` through the ALB security group.
+- The AWS target always exposes the proxy port and only exposes Admin API / Manager when `publish_admin_api` or `publish_manager_ui` are explicitly enabled.
 - The AWS target assumes IAM Identity Center / AWS SSO is available for logging into the Amazon Managed Grafana workspace.
-- The Azure target exposes ports `22`, `8000`, `8001`, and `8002` to the configured `admin_cidr`.
+- The Azure target always exposes SSH and the proxy port; Admin API / Manager stay localhost-only unless `publish_admin_api` or `publish_manager_ui` are explicitly enabled.
 - The Terraform CLI is available locally; AWS configuration formatting and validation have been run, but a real `plan` still depends on valid cloud credentials and workspace variables.

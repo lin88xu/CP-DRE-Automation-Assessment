@@ -44,10 +44,11 @@ It does not assume hidden platform automation outside the repository.
 
 ### 2.3 Primary recovery principle
 
-This codebase is mostly declarative and rebuild-oriented.
+This codebase is mostly declarative and rebuild-oriented, but the active local
+Minikube path now persists Kong state in Postgres.
 
-- Kong is deployed in DB-less mode in the active local and AWS paths.
-- Local Minikube Prometheus and Grafana use PVC-backed storage, while Kong remains rebuild-oriented.
+- Kong is deployed in PostgreSQL-backed mode in the active local path and in the AWS ECS task, with AWS persisting Postgres data on EFS.
+- Local Minikube Kong Postgres, Prometheus, and Grafana use PVC-backed storage.
 - AWS recovery is primarily a Terraform re-apply or targeted Terraform replacement exercise.
 - Azure is the main path where host-level Docker volumes may require backup and restore.
 
@@ -79,6 +80,8 @@ The default recovery decision should therefore be:
 | Asset | Environment | Persistence model | Recovery action |
 | --- | --- | --- | --- |
 | Kong declarative config | local, AWS, Azure | Source-controlled | Recreate from repo and redeploy |
+| Local Minikube Kong Postgres data | local | PVC-backed | Back up with `persistent-data.sh` or recreate by re-importing source-managed config |
+| AWS Kong Postgres data | AWS | EFS-backed | Protect with AWS-native EFS backup or snapshot tooling, or recreate by re-importing source-managed config |
 | Kong runtime pods/tasks | local, AWS | Ephemeral | Recreate |
 | Local Minikube Prometheus TSDB | local | PVC-backed | Back up with `persistent-data.sh` or recreate if history is not needed |
 | Local Minikube Grafana state | local | PVC-backed | Back up with `persistent-data.sh` or recreate if dashboards are fully provisioned |
@@ -247,7 +250,7 @@ Use this section when the affected environment is the local stack managed by:
 
 - Terraform only generates the local Ansible handoff files.
 - Ansible starts Minikube with the Docker driver.
-- Kong is DB-less and HPA-controlled.
+- Kong runs against PostgreSQL and remains HPA-controlled.
 - Prometheus and Grafana run in Kubernetes with PersistentVolumeClaims.
 - `./local-runtime.sh up` also starts localhost port-forwards for Kong, Prometheus, and Grafana.
 
@@ -430,7 +433,7 @@ The AWS environment is Terraform-managed and container-native:
 - VPC and subnets
 - internet-facing ALB
 - ECS cluster and Fargate service
-- Kong in DB-less mode
+- Kong in PostgreSQL-backed mode with a Postgres container whose data is persisted on EFS
 - CloudWatch logs
 - ECS autoscaling
 - Amazon Managed Service for Prometheus
@@ -859,6 +862,7 @@ Mandatory backups:
 Optional backups:
 
 - local Minikube Prometheus and Grafana PVCs if you need to preserve metrics history or Grafana state across rebuilds
+- AWS EFS backups or snapshots if you need point-in-time recovery of the Kong Postgres data path
 - Azure host Docker volumes if you need point-in-time recovery of host-persistent data
 - local compose volumes only if you intentionally use the compose-based stacks outside CI
 
@@ -903,9 +907,9 @@ Use this backup when you need to retain:
 - Prometheus time-series history collected during local testing
 - Grafana state written under `/var/lib/grafana`
 
-Do not expect it to preserve Kong configuration changes made outside source
-control. Kong remains DB-less and must still be redeployed from repo-managed
-manifests.
+This backup now preserves local Kong Postgres data in addition to Prometheus
+and Grafana state. Source-managed Kong config can still be recreated from the
+repository if you choose to rebuild instead of restore.
 
 ### 12.4 Azure host backup procedure
 

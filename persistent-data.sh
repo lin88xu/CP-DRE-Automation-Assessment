@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_BACKUP_ROOT="${ROOT_DIR}/.backups"
 MINIKUBE_NAMESPACE="${MINIKUBE_NAMESPACE:-kong}"
+MINIKUBE_POSTGRES_PVC_NAME="${MINIKUBE_POSTGRES_PVC_NAME:-kong-db-storage}"
 MINIKUBE_PROMETHEUS_PVC_NAME="${MINIKUBE_PROMETHEUS_PVC_NAME:-prometheus-storage}"
 MINIKUBE_GRAFANA_PVC_NAME="${MINIKUBE_GRAFANA_PVC_NAME:-grafana-storage}"
 
@@ -30,7 +31,7 @@ Stacks:
   deployment-kong     Docker Compose Kong stack under deployment/kong
   observability       Docker Compose Prometheus/Grafana stack under promethusGrafana
   azure-host-kong     Docker Compose Kong stack deployed under /opt/kong on the Azure VM
-  local-minikube      Local Minikube Prometheus and Grafana persistent volumes
+  local-minikube      Local Minikube Kong Postgres, Prometheus, and Grafana persistent volumes
   local-compose       Convenience alias for deployment-kong + observability during backup/inspect
 
 Options:
@@ -308,9 +309,10 @@ inspect_local_minikube() {
   require_command kubectl
   printf 'Stack: local-minikube\n'
   printf 'Namespace: %s\n' "${MINIKUBE_NAMESPACE}"
+  require_kube_pvc "${MINIKUBE_POSTGRES_PVC_NAME}"
   require_kube_pvc "${MINIKUBE_PROMETHEUS_PVC_NAME}"
   require_kube_pvc "${MINIKUBE_GRAFANA_PVC_NAME}"
-  kubectl -n "${MINIKUBE_NAMESPACE}" get pvc "${MINIKUBE_PROMETHEUS_PVC_NAME}" "${MINIKUBE_GRAFANA_PVC_NAME}"
+  kubectl -n "${MINIKUBE_NAMESPACE}" get pvc "${MINIKUBE_POSTGRES_PVC_NAME}" "${MINIKUBE_PROMETHEUS_PVC_NAME}" "${MINIKUBE_GRAFANA_PVC_NAME}"
 }
 
 backup_local_minikube() {
@@ -320,6 +322,7 @@ backup_local_minikube() {
   local helper_pod=""
 
   require_command kubectl
+  require_kube_pvc "${MINIKUBE_POSTGRES_PVC_NAME}"
   require_kube_pvc "${MINIKUBE_PROMETHEUS_PVC_NAME}"
   require_kube_pvc "${MINIKUBE_GRAFANA_PVC_NAME}"
 
@@ -333,7 +336,12 @@ backup_local_minikube() {
     printf 'CREATED_AT=%q\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   } > "${backup_dir}/metadata.env"
 
-  printf '%s\n' "${MINIKUBE_PROMETHEUS_PVC_NAME}" "${MINIKUBE_GRAFANA_PVC_NAME}" > "${backup_dir}/volumes.txt"
+  printf '%s\n' "${MINIKUBE_POSTGRES_PVC_NAME}" "${MINIKUBE_PROMETHEUS_PVC_NAME}" "${MINIKUBE_GRAFANA_PVC_NAME}" > "${backup_dir}/volumes.txt"
+
+  helper_pod="$(create_kube_helper_pod "${MINIKUBE_POSTGRES_PVC_NAME}")"
+  log "Backing up local Minikube PVC ${MINIKUBE_POSTGRES_PVC_NAME}"
+  kubectl -n "${MINIKUBE_NAMESPACE}" exec "${helper_pod}" -- tar -C /data -czf - . > "${backup_dir}/${MINIKUBE_POSTGRES_PVC_NAME}.tgz"
+  delete_kube_helper_pod "${helper_pod}"
 
   helper_pod="$(create_kube_helper_pod "${MINIKUBE_PROMETHEUS_PVC_NAME}")"
   log "Backing up local Minikube PVC ${MINIKUBE_PROMETHEUS_PVC_NAME}"
@@ -353,19 +361,32 @@ restore_local_minikube() {
   local helper_pod=""
 
   require_command kubectl
+  require_kube_pvc "${MINIKUBE_POSTGRES_PVC_NAME}"
   require_kube_pvc "${MINIKUBE_PROMETHEUS_PVC_NAME}"
   require_kube_pvc "${MINIKUBE_GRAFANA_PVC_NAME}"
 
+  [[ -f "${input_dir}/${MINIKUBE_POSTGRES_PVC_NAME}.tgz" ]] || die "Missing ${MINIKUBE_POSTGRES_PVC_NAME}.tgz in ${input_dir}"
   [[ -f "${input_dir}/${MINIKUBE_PROMETHEUS_PVC_NAME}.tgz" ]] || die "Missing ${MINIKUBE_PROMETHEUS_PVC_NAME}.tgz in ${input_dir}"
   [[ -f "${input_dir}/${MINIKUBE_GRAFANA_PVC_NAME}.tgz" ]] || die "Missing ${MINIKUBE_GRAFANA_PVC_NAME}.tgz in ${input_dir}"
 
   if [[ "${FORCE_RESTORE}" -ne 1 ]]; then
-    log "Scaling down local Minikube Prometheus and Grafana before restore"
+    log "Scaling down local Minikube Kong, Postgres, Prometheus, and Grafana before restore"
+    scale_kube_deployment "kong" 0
+    scale_kube_deployment "kong-db" 0
     scale_kube_deployment "prometheus" 0
     scale_kube_deployment "grafana" 0
+    wait_for_kube_pods_gone "kong"
+    wait_for_kube_pods_gone "kong-db"
     wait_for_kube_pods_gone "prometheus"
     wait_for_kube_pods_gone "grafana"
   fi
+
+  helper_pod="$(create_kube_helper_pod "${MINIKUBE_POSTGRES_PVC_NAME}")"
+  log "Restoring local Minikube PVC ${MINIKUBE_POSTGRES_PVC_NAME}"
+  kubectl -n "${MINIKUBE_NAMESPACE}" exec -i "${helper_pod}" -- sh -c \
+    'rm -rf /data/* /data/.[!.]* /data/..?* 2>/dev/null || true; tar -C /data -xzf -' \
+    < "${input_dir}/${MINIKUBE_POSTGRES_PVC_NAME}.tgz"
+  delete_kube_helper_pod "${helper_pod}"
 
   helper_pod="$(create_kube_helper_pod "${MINIKUBE_PROMETHEUS_PVC_NAME}")"
   log "Restoring local Minikube PVC ${MINIKUBE_PROMETHEUS_PVC_NAME}"
@@ -382,9 +403,13 @@ restore_local_minikube() {
   delete_kube_helper_pod "${helper_pod}"
 
   if [[ "${FORCE_RESTORE}" -ne 1 ]]; then
-    log "Scaling local Minikube Prometheus and Grafana back up after restore"
+    log "Scaling local Minikube Postgres, Kong, Prometheus, and Grafana back up after restore"
+    scale_kube_deployment "kong-db" 1
+    wait_for_kube_deployment "kong-db"
+    scale_kube_deployment "kong" 1
     scale_kube_deployment "prometheus" 1
     scale_kube_deployment "grafana" 1
+    wait_for_kube_deployment "kong"
     wait_for_kube_deployment "prometheus"
     wait_for_kube_deployment "grafana"
   fi

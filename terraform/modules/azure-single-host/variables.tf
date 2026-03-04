@@ -30,7 +30,7 @@ variable "vm_size" {
 
 variable "admin_cidr" {
   type        = string
-  description = "CIDR allowed to reach SSH and Kong ports."
+  description = "CIDR allowed to reach SSH and any published management ports."
 }
 
 variable "vnet_cidr" {
@@ -73,6 +73,16 @@ variable "manager_port" {
   description = "Public port mapped to the Kong Manager UI."
 }
 
+variable "publish_admin_api" {
+  type        = bool
+  description = "Whether to publish the Kong Admin API on the VM public IP."
+}
+
+variable "publish_manager_ui" {
+  type        = bool
+  description = "Whether to publish the Kong Manager UI on the VM public IP."
+}
+
 variable "app_host_header" {
   type        = string
   description = "Host header used by the sample Kong route."
@@ -88,4 +98,3 @@ variable "tags" {
   description = "Tags applied to Azure resources."
   default     = {}
 }
-

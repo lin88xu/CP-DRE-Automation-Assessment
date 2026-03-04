@@ -94,6 +94,18 @@
     dest: "{{ minikube_install_root }}/manifests/kong-configmap.yml"
     mode: "0644"
 
+- name: Render Minikube PostgreSQL manifest
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../../minikube/manifests/postgres.yml.j2"
+    dest: "{{ minikube_install_root }}/manifests/postgres.yml"
+    mode: "0644"
+
+- name: Render Minikube Kong bootstrap manifest
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../../minikube/manifests/kong-bootstrap.yml.j2"
+    dest: "{{ minikube_install_root }}/manifests/kong-bootstrap.yml"
+    mode: "0644"
+
 - name: Render Minikube Kong workload manifest
   ansible.builtin.template:
     src: "{{ playbook_dir }}/../../minikube/manifests/kong.yml.j2"
@@ -209,10 +221,121 @@
     HOME: "{{ minikube_exec_home }}"
     KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
 
-- name: Apply Minikube workload manifests
-  ansible.builtin.command: kubectl apply -f "{{ minikube_install_root }}/manifests"
-  register: minikube_apply
-  changed_when: "'created' in minikube_apply.stdout or 'configured' in minikube_apply.stdout"
+- name: Apply Minikube shared manifests
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - apply
+      - -f
+      - "{{ item }}"
+  loop:
+    - "{{ minikube_install_root }}/manifests/kong-configmap.yml"
+    - "{{ minikube_install_root }}/manifests/httpbin.yml"
+    - "{{ minikube_install_root }}/manifests/postgres.yml"
+    - "{{ minikube_install_root }}/manifests/prometheus-configmap.yml"
+    - "{{ minikube_install_root }}/manifests/grafana-configmap.yml"
+  register: minikube_shared_apply
+  changed_when: true
+  become_user: "{{ minikube_exec_user }}"
+  environment:
+    HOME: "{{ minikube_exec_home }}"
+    KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+
+- name: Wait for PostgreSQL deployment rollout
+  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/{{ kong_postgres_service_name }} --timeout={{ minikube_postgres_rollout_timeout }}
+  changed_when: false
+  become_user: "{{ minikube_exec_user }}"
+  environment:
+    HOME: "{{ minikube_exec_home }}"
+    KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+
+- name: Delete previous Kong bootstrap job
+  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" delete job kong-bootstrap --ignore-not-found
+  changed_when: false
+  become_user: "{{ minikube_exec_user }}"
+  environment:
+    HOME: "{{ minikube_exec_home }}"
+    KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+
+- name: Apply Kong bootstrap job manifest
+  ansible.builtin.command: kubectl apply -f "{{ minikube_install_root }}/manifests/kong-bootstrap.yml"
+  register: minikube_kong_bootstrap_apply
+  changed_when: true
+  become_user: "{{ minikube_exec_user }}"
+  environment:
+    HOME: "{{ minikube_exec_home }}"
+    KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+
+- name: Wait for Kong bootstrap job completion
+  block:
+    - name: Wait for Kong bootstrap job completion
+      ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" wait --for=condition=complete job/kong-bootstrap --timeout={{ minikube_kong_bootstrap_timeout }}
+      register: minikube_kong_bootstrap_wait
+      changed_when: false
+      become_user: "{{ minikube_exec_user }}"
+      environment:
+        HOME: "{{ minikube_exec_home }}"
+        KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+  rescue:
+    - name: Capture Kong bootstrap job details
+      ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" get job kong-bootstrap -o yaml
+      register: minikube_kong_bootstrap_job_details
+      changed_when: false
+      failed_when: false
+      become_user: "{{ minikube_exec_user }}"
+      environment:
+        HOME: "{{ minikube_exec_home }}"
+        KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+
+    - name: Capture Kong bootstrap pod details
+      ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" get pods -l job-name=kong-bootstrap -o wide
+      register: minikube_kong_bootstrap_pod_details
+      changed_when: false
+      failed_when: false
+      become_user: "{{ minikube_exec_user }}"
+      environment:
+        HOME: "{{ minikube_exec_home }}"
+        KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+
+    - name: Capture Kong bootstrap job logs
+      ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" logs job/kong-bootstrap --tail=200
+      register: minikube_kong_bootstrap_logs
+      changed_when: false
+      failed_when: false
+      become_user: "{{ minikube_exec_user }}"
+      environment:
+        HOME: "{{ minikube_exec_home }}"
+        KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
+
+    - name: Fail with Kong bootstrap diagnostics
+      ansible.builtin.fail:
+        msg: |
+          Kong bootstrap job did not complete within {{ minikube_kong_bootstrap_timeout }}.
+          kubectl wait stderr:
+          {{ minikube_kong_bootstrap_wait.stderr | default('unavailable', true) }}
+
+          Job details:
+          {{ minikube_kong_bootstrap_job_details.stdout | default('unavailable', true) }}
+
+          Pod details:
+          {{ minikube_kong_bootstrap_pod_details.stdout | default('unavailable', true) }}
+
+          Job logs:
+          {{ minikube_kong_bootstrap_logs.stdout | default(minikube_kong_bootstrap_logs.stderr, true) | default('unavailable', true) }}
+
+- name: Apply Minikube runtime manifests
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - apply
+      - -f
+      - "{{ item }}"
+  loop:
+    - "{{ minikube_install_root }}/manifests/kong.yml"
+    - "{{ minikube_install_root }}/manifests/prometheus.yml"
+    - "{{ minikube_install_root }}/manifests/grafana.yml"
+  register: minikube_runtime_apply
+  changed_when: true
   become_user: "{{ minikube_exec_user }}"
   environment:
     HOME: "{{ minikube_exec_home }}"

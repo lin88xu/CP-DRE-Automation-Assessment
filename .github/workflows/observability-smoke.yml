@@ -35,6 +35,7 @@ jobs:
         id: kong_config
         run: |
           docker compose \
+            --env-file deployment/kong/kong.env.example \
             --project-directory deployment/kong \
             -f deployment/kong/docker-compose.yml \
             config > ci-artifacts/observability/kong-compose-config.log
@@ -43,6 +44,7 @@ jobs:
         id: observability_config
         run: |
           docker compose \
+            --env-file promethusGrafana/grafana.env.example \
             --project-directory promethusGrafana \
             -f promethusGrafana/docker-compose.yml \
             config > ci-artifacts/observability/observability-compose-config.log
@@ -51,6 +53,7 @@ jobs:
         id: kong_up
         run: |
           docker compose \
+            --env-file deployment/kong/kong.env.example \
             --project-directory deployment/kong \
             -f deployment/kong/docker-compose.yml \
             up -d
@@ -88,6 +91,7 @@ jobs:
         id: observability_up
         run: |
           docker compose \
+            --env-file promethusGrafana/grafana.env.example \
             --project-directory promethusGrafana \
             -f promethusGrafana/docker-compose.yml \
             up -d
@@ -162,6 +166,7 @@ jobs:
         if: always()
         run: |
           docker compose \
+            --env-file deployment/kong/kong.env.example \
             --project-directory deployment/kong \
             -f deployment/kong/docker-compose.yml \
             logs --no-color > ci-artifacts/observability/kong-logs.log || true
@@ -170,6 +175,7 @@ jobs:
         if: always()
         run: |
           docker compose \
+            --env-file promethusGrafana/grafana.env.example \
             --project-directory promethusGrafana \
             -f promethusGrafana/docker-compose.yml \
             logs --no-color > ci-artifacts/observability/observability-logs.log || true
@@ -213,18 +219,20 @@ jobs:
           path: ci-artifacts/observability
           if-no-files-found: error
 
-      - name: Stop Kong stack
-        if: always()
-        run: |
-          docker compose \
-            --project-directory deployment/kong \
-            -f deployment/kong/docker-compose.yml \
-            down -v
-
       - name: Stop observability stack
         if: always()
         run: |
           docker compose \
+            --env-file promethusGrafana/grafana.env.example \
             --project-directory promethusGrafana \
             -f promethusGrafana/docker-compose.yml \
+            down -v
+
+      - name: Stop Kong stack
+        if: always()
+        run: |
+          docker compose \
+            --env-file deployment/kong/kong.env.example \
+            --project-directory deployment/kong \
+            -f deployment/kong/docker-compose.yml \
             down -v

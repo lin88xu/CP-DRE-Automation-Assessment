@@ -5,6 +5,21 @@ locals {
   })
 }
 
+resource "random_password" "kong_admin_gui_auth_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "kong_admin_gui_session_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "postgres_password" {
+  length  = 32
+  special = false
+}
+
 resource "azurerm_resource_group" "this" {
   name     = var.resource_group_name
   location = var.location
@@ -65,28 +80,34 @@ resource "azurerm_network_security_group" "this" {
     destination_address_prefix = "*"
   }
 
-  security_rule {
-    name                       = "kong-admin"
-    priority                   = 120
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = tostring(var.admin_port)
-    source_address_prefix      = var.admin_cidr
-    destination_address_prefix = "*"
+  dynamic "security_rule" {
+    for_each = var.publish_admin_api ? [1] : []
+    content {
+      name                       = "kong-admin"
+      priority                   = 120
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = tostring(var.admin_port)
+      source_address_prefix      = var.admin_cidr
+      destination_address_prefix = "*"
+    }
   }
 
-  security_rule {
-    name                       = "kong-manager"
-    priority                   = 130
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = tostring(var.manager_port)
-    source_address_prefix      = var.admin_cidr
-    destination_address_prefix = "*"
+  dynamic "security_rule" {
+    for_each = var.publish_manager_ui ? [1] : []
+    content {
+      name                       = "kong-manager"
+      priority                   = 130
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = tostring(var.manager_port)
+      source_address_prefix      = var.admin_cidr
+      destination_address_prefix = "*"
+    }
   }
 }
 
@@ -121,13 +142,22 @@ resource "azurerm_linux_virtual_machine" "this" {
   disable_password_authentication = true
   custom_data = base64encode(templatefile("${path.module}/../../templates/cloud-init-kong.sh.tftpl", {
     docker_compose = templatefile("${path.module}/../../templates/docker-compose.yml.tftpl", {
-      name_prefix    = var.name_prefix
-      kong_image     = var.kong_image
-      postgres_image = var.postgres_image
-      public_host    = azurerm_public_ip.this.ip_address
-      proxy_port     = var.proxy_port
-      admin_port     = var.admin_port
-      manager_port   = var.manager_port
+      name_prefix         = var.name_prefix
+      kong_image          = var.kong_image
+      postgres_image      = var.postgres_image
+      public_host         = azurerm_public_ip.this.ip_address
+      manager_public_host = var.publish_manager_ui ? azurerm_public_ip.this.ip_address : "127.0.0.1"
+      proxy_port          = var.proxy_port
+      admin_port          = var.admin_port
+      manager_port        = var.manager_port
+      proxy_bind_host     = "0.0.0.0"
+      admin_bind_host     = var.publish_admin_api ? "0.0.0.0" : "127.0.0.1"
+      manager_bind_host   = var.publish_manager_ui ? "0.0.0.0" : "127.0.0.1"
+    })
+    kong_env = templatefile("${path.module}/../../templates/kong.env.tftpl", {
+      postgres_password      = random_password.postgres_password.result
+      admin_gui_auth_conf    = jsonencode({ secret = random_password.kong_admin_gui_auth_secret.result })
+      admin_gui_session_conf = jsonencode({ secret = random_password.kong_admin_gui_session_secret.result })
     })
     docker_kong = local.docker_kong
   }))
@@ -152,4 +182,3 @@ resource "azurerm_linux_virtual_machine" "this" {
 
   tags = var.tags
 }
-

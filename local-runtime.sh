@@ -12,6 +12,7 @@ ANSIBLE_CONFIG_FILE="${ANSIBLE_DIR}/ansible.cfg"
 ROLES_DIR="${ANSIBLE_DIR}/roles"
 PLAYBOOK_DEFAULTS="${ANSIBLE_DIR}/playbooks/group_vars/all.yml"
 GLOBAL_DEFAULTS="${ANSIBLE_DIR}/group_vars/all.yml"
+ANSIBLE_SECRET_DIR="${ANSIBLE_SECRET_CACHE_DIR:-${ANSIBLE_DIR}/.secrets}"
 LOCAL_RUNTIME_STATE_DIR="${LOCAL_RUNTIME_STATE_DIR_OVERRIDE:-${ROOT_DIR}/.local-runtime}"
 LOCAL_FORWARD_DIR="${LOCAL_RUNTIME_STATE_DIR}/port-forward"
 ROLLBACK_STATE_DIR="${LOCAL_RUNTIME_STATE_DIR}/rollback"
@@ -242,6 +243,18 @@ resolve_var() {
   trim "${value}"
 }
 
+read_secret_file() {
+  local key="$1"
+  local secret_file="${ANSIBLE_SECRET_DIR}/localhost-${key}"
+
+  if [[ ! -f "${secret_file}" ]]; then
+    secret_file="${ANSIBLE_SECRET_DIR}/localhost/${key}"
+  fi
+
+  [[ -f "${secret_file}" ]] || return 1
+  tr -d '\r\n' < "${secret_file}"
+}
+
 MINIKUBE_PROFILE="$(resolve_var "minikube_profile" "kong-assessment")"
 MINIKUBE_NAMESPACE="$(resolve_var "minikube_namespace" "kong")"
 
@@ -276,9 +289,25 @@ inventory_file() {
   fi
 }
 
+sanitized_generated_vars_file() {
+  local sanitized_file="${LOCAL_RUNTIME_STATE_DIR}/terraform-ansible-vars.sanitized.yml"
+
+  [[ -f "${GENERATED_VARS}" ]] || return 1
+  ensure_dir "${LOCAL_RUNTIME_STATE_DIR}"
+
+  awk '
+    $0 == "\"observability_grafana_admin_user\": \"\"" { next }
+    $0 == "\"observability_grafana_admin_password\": \"\"" { next }
+    { print }
+  ' "${GENERATED_VARS}" > "${sanitized_file}"
+
+  printf '%s\n' "${sanitized_file}"
+}
+
 run_playbook() {
   local playbook="$1"
   local inventory
+  local generated_vars_file=""
   local -a command
 
   require_command ansible-playbook
@@ -291,7 +320,9 @@ run_playbook() {
 
   command+=(-i "${inventory}" "${playbook}")
 
-  if [[ -f "${GENERATED_VARS}" ]]; then
+  if generated_vars_file="$(sanitized_generated_vars_file 2>/dev/null)"; then
+    command+=(-e "@${generated_vars_file}")
+  elif [[ -f "${GENERATED_VARS}" ]]; then
     command+=(-e "@${GENERATED_VARS}")
   fi
 
@@ -409,6 +440,22 @@ start_local_port_forwards() {
 }
 
 print_local_urls() {
+  local grafana_user="grafana-admin"
+  local grafana_password="(generated during deploy)"
+
+  if [[ -n "${GRAFANA_ADMIN_USER:-}" ]]; then
+    grafana_user="${GRAFANA_ADMIN_USER}"
+  else
+    grafana_user="$(trim "$(resolve_var "observability_grafana_admin_user" "${grafana_user}")")"
+  fi
+
+  if [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+    grafana_password="${GRAFANA_ADMIN_PASSWORD}"
+  fi
+  if [[ -f "${ANSIBLE_SECRET_DIR}/localhost-grafana_admin_password" ]] || [[ -f "${ANSIBLE_SECRET_DIR}/localhost/grafana_admin_password" ]]; then
+    grafana_password="$(read_secret_file "grafana_admin_password")"
+  fi
+
   cat <<EOF
 Local URLs:
   Grafana: http://127.0.0.1:3000
@@ -416,14 +463,75 @@ Local URLs:
   Kong Proxy: http://127.0.0.1:8000
   Kong Admin API: http://127.0.0.1:8001
   Kong Manager UI: http://127.0.0.1:8002
-  Grafana login: admin/admin
+  Grafana login: ${grafana_user}/${grafana_password}
 EOF
+}
+
+resolve_grafana_admin_user() {
+  if [[ -n "${GRAFANA_ADMIN_USER:-}" ]]; then
+    printf '%s\n' "${GRAFANA_ADMIN_USER}"
+    return 0
+  fi
+
+  trim "$(resolve_var "observability_grafana_admin_user" "grafana-admin")"
+}
+
+resolve_grafana_admin_password() {
+  if [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+    printf '%s\n' "${GRAFANA_ADMIN_PASSWORD}"
+    return 0
+  fi
+
+  read_secret_file "grafana_admin_password" 2>/dev/null || printf '%s' ''
+}
+
+reconcile_grafana_admin_credentials() {
+  local grafana_password=""
+  local grafana_pod=""
+  local reset_output=""
+
+  grafana_password="$(resolve_grafana_admin_password)"
+  if [[ -z "${grafana_password}" ]]; then
+    warn "Skipping Grafana credential reconciliation: no admin password is available"
+    return 0
+  fi
+
+  require_command kubectl
+  if ! kubectl -n "${MINIKUBE_NAMESPACE}" rollout status deployment/grafana --timeout=240s >/dev/null 2>&1; then
+    warn "Skipping Grafana credential reconciliation: deployment/grafana is not ready"
+    return 0
+  fi
+
+  grafana_pod="$(kubectl -n "${MINIKUBE_NAMESPACE}" get pods -l app=grafana -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -z "${grafana_pod}" ]]; then
+    warn "Skipping Grafana credential reconciliation: no Grafana pod was found"
+    return 0
+  fi
+
+  if reset_output="$(kubectl -n "${MINIKUBE_NAMESPACE}" exec "${grafana_pod}" -- \
+    grafana cli --homepath /usr/share/grafana admin reset-admin-password "${grafana_password}" 2>&1)"; then
+    log "Reconciled Grafana admin password in pod ${grafana_pod}"
+    return 0
+  fi
+
+  if reset_output="$(kubectl -n "${MINIKUBE_NAMESPACE}" exec "${grafana_pod}" -- \
+    grafana-cli admin reset-admin-password "${grafana_password}" 2>&1)"; then
+    log "Reconciled Grafana admin password in pod ${grafana_pod}"
+    return 0
+  fi
+
+  warn "Grafana admin password reset failed in pod ${grafana_pod}; continuing with verification"
+  warn "Grafana reset output: ${reset_output}"
+  return 0
 }
 
 verify_local_runtime() {
   require_command python3
   log "Verifying the local runtime"
+  reconcile_grafana_admin_credentials
   python3 "${ROOT_DIR}/tests/TP_LOCAL_STACK_VERIFICATION_V001.py"
+  GRAFANA_USER="$(resolve_grafana_admin_user)" \
+  GRAFANA_PASSWORD="$(resolve_grafana_admin_password)" \
   python3 "${ROOT_DIR}/tests/TP_DASHBOARD_CONTENT_CORRECTNESS_V001.py"
 }
 
