@@ -28,17 +28,6 @@ data "aws_iam_policy_document" "grafana_assume_role" {
   }
 }
 
-data "aws_iam_policy_document" "grafana_assume_role" {
-  statement {
-    actions = ["sts:AssumeRole"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["grafana.amazonaws.com"]
-    }
-  }
-}
-
 locals {
   selected_azs = var.availability_zone != "" ? concat(
     [var.availability_zone],
@@ -62,6 +51,50 @@ locals {
     observability_kong_job_name = var.observability_kong_job_name
   })
   amp_remote_write_endpoint = var.enable_managed_observability ? "${aws_prometheus_workspace.this[0].prometheus_endpoint}api/v1/remote_write" : null
+  grafana_role_assignments = {
+    admin = {
+      role      = "ADMIN"
+      user_ids  = var.grafana_admin_user_ids
+      group_ids = var.grafana_admin_group_ids
+    }
+    editor = {
+      role      = "EDITOR"
+      user_ids  = var.grafana_editor_user_ids
+      group_ids = var.grafana_editor_group_ids
+    }
+    viewer = {
+      role      = "VIEWER"
+      user_ids  = var.grafana_viewer_user_ids
+      group_ids = var.grafana_viewer_group_ids
+    }
+  }
+  grafana_role_assignments_enabled = var.enable_managed_observability ? {
+    for name, assignment in local.grafana_role_assignments :
+    name => assignment
+    if length(assignment.user_ids) > 0 || length(assignment.group_ids) > 0
+  } : {}
+  grafana_all_user_ids = concat(
+    var.grafana_admin_user_ids,
+    var.grafana_editor_user_ids,
+    var.grafana_viewer_user_ids,
+  )
+  grafana_all_group_ids = concat(
+    var.grafana_admin_group_ids,
+    var.grafana_editor_group_ids,
+    var.grafana_viewer_group_ids,
+  )
+  grafana_user_role_overlap = distinct([
+    for id in local.grafana_all_user_ids :
+    id
+    if length([for candidate in local.grafana_all_user_ids : candidate if candidate == id]) > 1
+  ])
+  grafana_group_role_overlap = distinct([
+    for id in local.grafana_all_group_ids :
+    id
+    if length([for candidate in local.grafana_all_group_ids : candidate if candidate == id]) > 1
+  ])
+  grafana_bootstrap_enabled        = var.enable_managed_observability && var.enable_grafana_dashboard_bootstrap
+  grafana_bootstrap_dashboard_path = "${path.module}/../../templates/kong-official.json"
   common_tags = merge(var.tags, {
     ManagedBy = "Terraform"
   })
@@ -568,43 +601,9 @@ resource "terraform_data" "grafana_dashboard_bootstrap" {
     data.aws_region.current.name,
   ]
 
-resource "aws_prometheus_workspace" "this" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  alias = local.amp_workspace_alias
-
-  tags = merge(local.common_tags, {
-    Name = local.amp_workspace_alias
-  })
-}
-
-resource "aws_prometheus_rule_group_namespace" "alerts" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  workspace_id = aws_prometheus_workspace.this[0].id
-  name         = "kong-alerts"
-  data         = local.amp_alert_rules
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-kong-alerts"
-  })
-}
-
-resource "aws_prometheus_rule_group_namespace" "recording" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  workspace_id = aws_prometheus_workspace.this[0].id
-  name         = "kong-recording-rules"
-  data         = local.amp_recording_rules
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-kong-recording-rules"
-  })
-}
-
-resource "aws_iam_role" "execution" {
-  name               = "${var.name_prefix}-execution-role"
-  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
+  provisioner "local-exec" {
+    command     = "${path.module}/../../scripts/import_amg_dashboard.py"
+    interpreter = ["/usr/bin/env", "python3"]
 
     environment = {
       AMG_URL         = aws_grafana_workspace.this[0].endpoint
@@ -620,60 +619,6 @@ resource "aws_iam_role" "execution" {
     aws_grafana_role_association.roles,
     aws_grafana_workspace_service_account_token.dashboard_bootstrap
   ]
-}
-
-resource "aws_iam_role" "task" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  name               = "${var.name_prefix}-task-role"
-  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-task-role"
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "task_amp_remote_write" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  role       = aws_iam_role.task[0].name
-  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonPrometheusRemoteWriteAccess"
-}
-
-resource "aws_iam_role" "grafana" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  name               = "${var.name_prefix}-grafana-role"
-  assume_role_policy = data.aws_iam_policy_document.grafana_assume_role.json
-
-  tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-grafana-role"
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "grafana_amp_query" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  role       = aws_iam_role.grafana[0].name
-  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonPrometheusQueryAccess"
-}
-
-resource "aws_grafana_workspace" "this" {
-  count = var.enable_managed_observability ? 1 : 0
-
-  name                     = local.grafana_workspace_name
-  description              = "Managed Grafana workspace for Kong observability."
-  account_access_type      = "CURRENT_ACCOUNT"
-  authentication_providers = ["AWS_SSO"]
-  permission_type          = "CUSTOMER_MANAGED"
-  role_arn                 = aws_iam_role.grafana[0].arn
-  data_sources             = ["PROMETHEUS"]
-
-  tags = merge(local.common_tags, {
-    Name = local.grafana_workspace_name
-  })
-
-  depends_on = [aws_iam_role_policy_attachment.grafana_amp_query]
 }
 
 resource "aws_ecs_cluster" "this" {

@@ -217,7 +217,7 @@
     KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
 
 - name: Wait for sample upstream deployment rollout
-  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/httpbin --timeout=180s
+  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/httpbin --timeout={{ minikube_httpbin_rollout_timeout }}
   changed_when: false
   become_user: "{{ minikube_exec_user }}"
   environment:
@@ -225,7 +225,7 @@
     KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
 
 - name: Wait for Kong deployment rollout
-  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/kong --timeout=240s
+  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/kong --timeout={{ minikube_kong_rollout_timeout }}
   changed_when: false
   become_user: "{{ minikube_exec_user }}"
   environment:
@@ -233,7 +233,7 @@
     KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
 
 - name: Wait for Prometheus deployment rollout
-  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/prometheus --timeout=180s
+  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/prometheus --timeout={{ minikube_prometheus_rollout_timeout }}
   changed_when: false
   become_user: "{{ minikube_exec_user }}"
   environment:
@@ -241,7 +241,7 @@
     KUBECONFIG: "{{ minikube_exec_kubeconfig }}"
 
 - name: Wait for Grafana deployment rollout
-  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/grafana --timeout=180s
+  ansible.builtin.command: kubectl -n "{{ minikube_namespace }}" rollout status deployment/grafana --timeout={{ minikube_grafana_rollout_timeout }}
   changed_when: false
   become_user: "{{ minikube_exec_user }}"
   environment:

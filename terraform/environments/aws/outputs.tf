@@ -52,8 +52,3 @@ output "grafana_workspace_arn" {
   value       = module.kong.grafana_workspace_arn
   description = "Amazon Managed Grafana workspace ARN."
 }
-
-output "grafana_workspace_url" {
-  value       = module.kong.grafana_workspace_url
-  description = "Amazon Managed Grafana workspace URL."
-}
