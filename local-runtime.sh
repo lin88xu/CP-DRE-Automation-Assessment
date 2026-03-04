@@ -26,6 +26,7 @@ VERIFY_AFTER_DEPLOY=0
 AUTO_ROLLBACK=0
 ROLLBACK_REF=""
 ROLLBACK_NESTED=0
+ALLOW_DIRTY_SNAPSHOT=0
 
 log() {
   printf '[local-runtime] %s\n' "$*"
@@ -51,6 +52,7 @@ Options:
   --skip-terraform          Skip terraform init/apply before "up".
   --verify                  Run local verification tests after "up".
   --auto-rollback           If deploy or verification fails, redeploy the last verified-good revision.
+  --allow-dirty-snapshot    Record a rollback snapshot even if the git worktree has local edits.
   --rollback-ref <git-ref>  Override the git ref used by "rollback".
   --ask-become-pass         Always pass -K to ansible-playbook.
   --no-ask-become-pass      Never pass -K to ansible-playbook.
@@ -60,6 +62,7 @@ Examples:
   ./local-runtime.sh
   ./local-runtime.sh up
   ./local-runtime.sh up --verify --auto-rollback
+  ./local-runtime.sh up --verify --allow-dirty-snapshot
   ./local-runtime.sh down
   ./local-runtime.sh rollback
   ./local-runtime.sh status
@@ -131,7 +134,19 @@ current_git_commit_timestamp() {
 
 current_git_dirty() {
   git_available || return 1
-  [[ -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]
+  if git -C "${ROOT_DIR}" diff --name-only --no-ext-diff | grep -v '^.local-runtime/' | grep -q .; then
+    return 0
+  fi
+
+  if git -C "${ROOT_DIR}" diff --cached --name-only --no-ext-diff | grep -v '^.local-runtime/' | grep -q .; then
+    return 0
+  fi
+
+  if git -C "${ROOT_DIR}" ls-files --others --exclude-standard | grep -v '^.local-runtime/' | grep -q .; then
+    return 0
+  fi
+
+  return 1
 }
 
 write_rollback_metadata() {
@@ -353,8 +368,11 @@ record_last_known_good_revision() {
   fi
 
   if current_git_dirty; then
-    warn "Skipping rollback snapshot: working tree is dirty, so the deployment is not reproducible by git ref"
-    return 0
+    if [[ "${ALLOW_DIRTY_SNAPSHOT}" -ne 1 ]]; then
+      warn "Skipping rollback snapshot: working tree is dirty, so the deployment is not reproducible by git ref"
+      return 0
+    fi
+    warn "Recording rollback snapshot despite dirty working tree because --allow-dirty-snapshot was set"
   fi
 
   commit_ref="$(current_git_commit)"
@@ -684,6 +702,9 @@ while [[ $# -gt 0 ]]; do
     --auto-rollback)
       AUTO_ROLLBACK=1
       VERIFY_AFTER_DEPLOY=1
+      ;;
+    --allow-dirty-snapshot)
+      ALLOW_DIRTY_SNAPSHOT=1
       ;;
     --rollback-ref)
       shift
