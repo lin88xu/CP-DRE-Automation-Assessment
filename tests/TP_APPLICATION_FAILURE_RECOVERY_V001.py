@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from TP_REMOTE_STACK_VERIFICATION_V001 import (
     AWS_TERRAFORM_OUTPUTS,
@@ -46,12 +46,85 @@ _load_tfvars_defaults()
 
 ECS_CLUSTER_NAME = os.getenv(
     "ECS_CLUSTER_NAME",
-    AWS_TERRAFORM_OUTPUTS.get("ecs_cluster_name", f"{NAME_PREFIX}-cluster"),
-)
+    AWS_TERRAFORM_OUTPUTS.get("ecs_cluster_name", ""),
+).strip()
 ECS_SERVICE_NAME = os.getenv(
     "ECS_SERVICE_NAME",
-    AWS_TERRAFORM_OUTPUTS.get("ecs_service_name", f"{NAME_PREFIX}-service"),
-)
+    AWS_TERRAFORM_OUTPUTS.get("ecs_service_name", ""),
+).strip()
+
+
+def parse_ecs_name(arn_or_name: str) -> str:
+    return arn_or_name.rsplit("/", 1)[-1]
+
+
+def pick_obvious_match(candidates: List[str], description: str) -> str:
+    if not candidates:
+        if description == "ECS cluster":
+            raise RuntimeError(
+                f"no {description} candidates were found in region {AWS_REGION}. "
+                "Verify that your AWS CLI is pointed at the expected account and region. "
+                "Useful checks: "
+                "`aws sts get-caller-identity` and "
+                f"`aws --region {AWS_REGION} ecs list-clusters`.",
+            )
+        raise RuntimeError(f"no {description} candidates were found in region {AWS_REGION}")
+
+    if len(candidates) == 1:
+        return parse_ecs_name(candidates[0])
+
+    prefix_matches = [candidate for candidate in candidates if NAME_PREFIX in parse_ecs_name(candidate)]
+    if len(prefix_matches) == 1:
+        return parse_ecs_name(prefix_matches[0])
+
+    raise RuntimeError(
+        f"could not determine a unique {description}. "
+        f"Candidates: {', '.join(parse_ecs_name(candidate) for candidate in candidates)}. "
+        f"Set the explicit environment variable instead.",
+    )
+
+
+def discover_ecs_identifiers() -> Tuple[str, str]:
+    cluster_payload = aws_json(["ecs", "list-clusters"])
+    cluster_arns = cluster_payload.get("clusterArns", [])
+    cluster_name = pick_obvious_match(cluster_arns, "ECS cluster")
+
+    service_payload = aws_json(["ecs", "list-services", "--cluster", cluster_name])
+    service_arns = service_payload.get("serviceArns", [])
+    service_name = pick_obvious_match(service_arns, "ECS service")
+
+    return cluster_name, service_name
+
+
+def ensure_ecs_identifiers_configured() -> Tuple[str, str]:
+    if ECS_CLUSTER_NAME and ECS_SERVICE_NAME:
+        return ECS_CLUSTER_NAME, ECS_SERVICE_NAME
+
+    if ECS_CLUSTER_NAME and not ECS_SERVICE_NAME:
+        service_payload = aws_json(["ecs", "list-services", "--cluster", ECS_CLUSTER_NAME])
+        service_name = pick_obvious_match(service_payload.get("serviceArns", []), "ECS service")
+        return ECS_CLUSTER_NAME, service_name
+
+    if ECS_SERVICE_NAME and not ECS_CLUSTER_NAME:
+        cluster_payload = aws_json(["ecs", "list-clusters"])
+        cluster_name = pick_obvious_match(cluster_payload.get("clusterArns", []), "ECS cluster")
+        return cluster_name, ECS_SERVICE_NAME
+
+    try:
+        return discover_ecs_identifiers()
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "ECS cluster/service names are not configured and automatic discovery was not unique. "
+            "Set ECS_CLUSTER_NAME and ECS_SERVICE_NAME explicitly, or re-expose those Terraform outputs. "
+            f"Discovery detail: {exc}",
+        ) from exc
+
+
+def resolved_ecs_identifiers() -> Tuple[str, str]:
+    cluster_name, service_name = ensure_ecs_identifiers_configured()
+    os.environ.setdefault("ECS_CLUSTER_NAME", cluster_name)
+    os.environ.setdefault("ECS_SERVICE_NAME", service_name)
+    return cluster_name, service_name
 
 
 def run_command(args: List[str]) -> subprocess.CompletedProcess[str]:
@@ -151,6 +224,10 @@ def verify_service_recovery(stopped_task_arn: str) -> None:
 
 
 def main() -> None:
+    global ECS_CLUSTER_NAME  # noqa: PLW0603
+    global ECS_SERVICE_NAME  # noqa: PLW0603
+
+    ECS_CLUSTER_NAME, ECS_SERVICE_NAME = resolved_ecs_identifiers()
     print(f"[RUN] AWS ECS application failure demo against {ECS_CLUSTER_NAME}/{ECS_SERVICE_NAME} in {AWS_REGION}")
 
     initial_tasks = list_service_tasks()
