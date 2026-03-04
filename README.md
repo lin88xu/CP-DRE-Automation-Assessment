@@ -82,6 +82,91 @@ Prometheus -> Grafana
   - Grafana: 3000
 ```
 
+## Operations / Recovery
+
+Primary operator entrypoints:
+
+- Local deploy or teardown:
+  `./local-runtime.sh up`, `./local-runtime.sh down`, `./local-runtime.sh status`
+- Local guarded deploy with automated rollback:
+  `./local-runtime.sh up --verify --auto-rollback`
+- Local manual rollback to the last verified-good snapshot:
+  `./local-runtime.sh rollback`
+- Local automated detection and guarded recovery:
+  `./auto-remediation.py detect` or `./auto-remediation.py remediate`
+- Persistent-data backup and restore:
+  `./persistent-data.sh backup <local-minikube|deployment-kong|observability|azure-host-kong>`
+  and `./persistent-data.sh restore <stack> --input-dir <backup-dir>`
+- Major-outage platform rebuild:
+  `./terraform/disaster-recovery.sh <local|aws|azure> rebuild`
+
+For the full recovery procedures and environment-specific rebuild guidance, see
+[docs/RECOVERY_RUNBOOK.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/docs/RECOVERY_RUNBOOK.md).
+
+Recommended local automation flow:
+
+```bash
+./auto-remediation.py detect
+./auto-remediation.py remediate
+./auto-remediation.py remediate --allow-restore --backup-before-destructive
+./auto-remediation.py watch --interval-seconds 300 --allow-restore --stop-on-failure
+```
+
+- `detect` is passive and records evidence only.
+- `remediate` first attempts a safe redeploy using the existing verified deploy and rollback path.
+- `--allow-restore` permits restoring the latest `local-minikube` backup if safe redeploy is not enough.
+- `--allow-disaster-recovery` permits a full local rebuild through `./terraform/disaster-recovery.sh local rebuild`.
+- `watch` repeats the same logic on a timer and writes evidence under `.auto-remediation/`.
+
+## Persistent Data
+
+The current active local runtime is the Minikube-backed path behind
+`./local-runtime.sh`. In that path:
+
+- Kong is DB-less
+- Prometheus stores its TSDB on a PersistentVolumeClaim
+- Grafana stores its SQLite state on a PersistentVolumeClaim
+
+That means the local stack is mixed-mode:
+
+- Kong remains rebuild-oriented
+- Prometheus and Grafana now retain local state across pod restarts and cluster
+  reconciliations
+- backup and restore is available for those local Minikube PVCs when you need
+  point-in-time recovery
+
+The persistent-data backup and restore automation covers:
+
+- local Minikube PVC-backed Prometheus and Grafana data
+- Docker-volume surfaces in this repository:
+  `deployment/kong/docker-compose.yml`,
+  `promethusGrafana/docker-compose.yml`,
+  and `/opt/kong` on the Azure host deployment
+
+Use the helper script:
+
+```bash
+./persistent-data.sh inspect local-minikube
+./persistent-data.sh backup local-minikube
+./persistent-data.sh restore local-minikube --input-dir .backups/<backup-dir>
+./persistent-data.sh inspect local-compose
+./persistent-data.sh backup deployment-kong
+./persistent-data.sh backup observability
+./persistent-data.sh restore deployment-kong --input-dir .backups/<backup-dir>
+./persistent-data.sh restore observability --input-dir .backups/<backup-dir>
+```
+
+On the Azure host:
+
+```bash
+./persistent-data.sh backup azure-host-kong --output-dir /var/backups/kong
+./persistent-data.sh restore azure-host-kong --input-dir /var/backups/kong/<backup-dir>
+```
+
+For the full backup and restore procedures, including what must still be backed
+up outside the repository such as Terraform state and cloud credentials, see
+[docs/RECOVERY_RUNBOOK.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/docs/RECOVERY_RUNBOOK.md#L812).
+
 ## Repository Layout
 
 ```text
@@ -135,6 +220,8 @@ This repository contains the required deliverables from the assessment brief:
   [kong/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/kong),
   [anisible/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/anisible),
   [promethusGrafana/](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/promethusGrafana)
+- Recovery runbook:
+  [docs/RECOVERY_RUNBOOK.md](/mnt/c/Users/linxu/Documents/Workspaces/CP-DRE-Automation-Assessment/docs/RECOVERY_RUNBOOK.md)
 
 ## Infrastructure As Code
 
@@ -296,7 +383,7 @@ Failure scenarios covered by the design:
 3. Misconfiguration:
    Broken declarative config or invalid deployment change.
    Expected behavior: CI validation or smoke test should fail before rollout.
-   Recovery: fix config in Git and redeploy, or revert to last known-good commit.
+   Recovery: fix config in Git and redeploy, or use the local automated rollback path to return to the last verified-good commit.
 
 4. Telemetry failure:
    Prometheus cannot scrape Kong metrics.
@@ -321,10 +408,35 @@ localhost port-forwards, and supports:
 ./local-runtime.sh toggle
 ./local-runtime.sh up
 ./local-runtime.sh down
+./local-runtime.sh rollback
 ./local-runtime.sh status
 ```
 
 `toggle` turns the local runtime off when it is already active, and starts it when it is not.
+
+Automated rollback execution is available for the local stack:
+
+```bash
+./local-runtime.sh up --verify
+./local-runtime.sh up --verify --auto-rollback
+./local-runtime.sh rollback
+./auto-remediation.py detect
+./auto-remediation.py remediate
+./auto-remediation.py remediate --allow-restore --allow-disaster-recovery
+```
+
+- `up --verify` runs the local post-deployment verification scripts and records the current clean git commit as the last verified-good snapshot.
+- `up --verify --auto-rollback` attempts the deployment, runs verification, and if either step fails it redeploys the last verified-good snapshot from a detached git worktree.
+- `rollback` manually redeploys the last verified-good snapshot.
+- `auto-remediation.py detect` checks the local runtime, localhost access, verification scripts, and Prometheus alert state without changing the environment.
+- `auto-remediation.py remediate` classifies the live local stack, attempts a safe redeploy first, and can optionally escalate to backup restore and full local rebuild.
+
+The remediation controller writes timestamped evidence and command logs under
+`.auto-remediation/`. It is intended for the local Minikube path only; AWS and
+Azure rebuilds remain operator-driven because they are higher-blast-radius
+actions.
+
+Rollback snapshots are recorded only from clean git commits, so a dirty working tree will deploy normally but will not overwrite the last verified-good snapshot.
 
 For local runs, `./local-runtime.sh up` prompts for the sudo password used by
 Ansible `become`, which is required because the playbook installs packages and
@@ -360,6 +472,9 @@ Validated locally in this workspace:
 - Grafana dashboard content verification passes against the provisioned `Kong (official)` dashboard
 - GitHub Actions workflows are present for Terraform, Ansible, observability smoke tests, and Minikube HPA smoke testing
 - The local Ansible playbooks now target a single Minikube-backed local runtime
+- Automated rollback execution is implemented in `./local-runtime.sh` for verified local deployments
+- Automated local failure detection and guarded recovery is implemented in `./auto-remediation.py`
+- Persistent-data backup and restore automation is implemented in `./persistent-data.sh`, including local Minikube PVCs for Prometheus and Grafana
 
 Known limitation from local validation:
 
@@ -386,6 +501,6 @@ Assumptions:
 Natural extensions if more time were available:
 
 1. Add cloud deployment workflows for Azure plans and applies.
-2. Add rollback documentation and a concrete recovery runbook.
-3. Add backup and restore procedures for persistent data.
+2. Extend automated rollback concepts beyond the local runtime into a real cloud release workflow.
+3. Add scheduled backup execution and off-host retention for Azure persistent volumes.
 4. Harden secrets handling and reduce default open access in cloud examples.

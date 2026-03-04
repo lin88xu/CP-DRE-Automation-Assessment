@@ -32,6 +32,31 @@ terraform/
 
 This is intentionally lightweight for the assessment. Local uses a Terraform-to-Ansible handoff, AWS uses ECS/Fargate with managed observability, and Azure stays on a single VM to keep the packaging understandable across targets.
 
+## Disaster Recovery
+
+For a major outage, use the repo-native rebuild wrapper:
+
+```bash
+./terraform/disaster-recovery.sh local rebuild
+./terraform/disaster-recovery.sh aws rebuild -- -var-file=terraform.tfvars
+./terraform/disaster-recovery.sh azure rebuild -- -var-file=terraform.tfvars
+```
+
+What it does:
+
+- `local`: runs the local runtime teardown and redeploy flow, then verifies the rebuilt stack by default
+- `aws`: runs `terraform init`, `terraform destroy`, and `terraform apply` for `terraform/environments/aws`
+- `azure`: runs `terraform init`, `terraform destroy`, and `terraform apply` for `terraform/environments/azure`
+
+For dry-run recovery planning:
+
+```bash
+./terraform/disaster-recovery.sh aws plan -- -var-file=terraform.tfvars
+./terraform/disaster-recovery.sh azure plan -- -var-file=terraform.tfvars
+```
+
+Logs are written under `terraform/recovery-artifacts/`.
+
 ## Usage
 
 Local handoff:

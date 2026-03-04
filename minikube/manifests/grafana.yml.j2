@@ -1,3 +1,18 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ minikube_grafana_pvc_name }}
+  namespace: {{ minikube_namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ minikube_grafana_storage_size }}
+{% if minikube_storage_class_name %}
+  storageClassName: {{ minikube_storage_class_name }}
+{% endif %}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,6 +20,8 @@ metadata:
   namespace: {{ minikube_namespace }}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: grafana
@@ -68,7 +85,8 @@ spec:
           configMap:
             name: grafana-dashboard-kong-official
         - name: grafana-storage
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: {{ minikube_grafana_pvc_name }}
 ---
 apiVersion: v1
 kind: Service

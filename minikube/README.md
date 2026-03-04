@@ -11,10 +11,11 @@ What it deploys:
 - a Prometheus deployment and NodePort service that scrapes Kong metrics
 - a Grafana deployment and NodePort service preloaded with the official Kong dashboard
 - a HorizontalPodAutoscaler for Kong based on CPU and memory utilization
+- PersistentVolumeClaims for Prometheus and Grafana so observability data survives pod recreation
 
 The Ansible Minikube role installs Minikube and `kubectl`, starts a local
 cluster with the Docker driver, enables the `metrics-server` and `ingress`
-addons, and applies these manifests.
+addons plus the default storage add-ons, and applies these manifests.
 
 Default access ports after deployment:
 

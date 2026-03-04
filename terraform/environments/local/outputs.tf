@@ -32,3 +32,8 @@ output "route_test_command" {
   value       = module.kong.route_test_command
   description = "Sample command to verify routing after Ansible deployment."
 }
+
+output "disaster_recovery_rebuild_command" {
+  value       = "bash ../../disaster-recovery.sh local rebuild"
+  description = "Repository-native command to rebuild the local platform during a major outage."
+}
